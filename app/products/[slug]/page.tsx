@@ -179,9 +179,9 @@ export default function ProductPage() {
     };
   }, [slug]);
 
-  if (!loading && !product) {
-    notFound();
-  }
+  // if (!loading && !product) {
+  //   notFound();
+  // }
 
   // Compute pricing
   const now = useMemo(() => new Date(), []);

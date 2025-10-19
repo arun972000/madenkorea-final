@@ -234,7 +234,7 @@ export function Header() {
                                     </DisabledItem>
                                   ) : (
                                     <Link
-                                      href={`/brands/${b.slug}`}
+                                      href={`/brand/${b.slug}`}
                                       className="flex items-center justify-between rounded-lg px-3 py-2 text-sm hover:bg-accent"
                                     >
                                       <span>{b.name}</span>
@@ -345,7 +345,7 @@ export function Header() {
                           ) : (
                             <Link
                               key={b.slug}
-                              href={`/brands/${b.slug}`}
+                              href={`/brand/${b.slug}`}
                               className={`${base} hover:bg-accent`}
                             >
                               <div className="font-medium">{b.name}</div>
