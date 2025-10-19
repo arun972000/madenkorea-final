@@ -157,7 +157,7 @@ export function Header() {
                 <div className="px-5 py-4 flex items-center justify-between">
                   <Link href="/" className="flex items-center">
                     <Image
-                      src="/logo-square.png"
+                      src="/squar-logo.png"
                       alt="Made Korea"
                       width={48}
                       height={48}
@@ -261,7 +261,7 @@ export function Header() {
             {/* Logo (desktop) */}
             <Link href="/" className="flex items-center">
               <Image
-                src="/logo-square.png"
+                src="/squar-logo.png"
                 alt="Made Korea"
                 width={LOGO_PX}
                 height={LOGO_PX}
@@ -391,7 +391,7 @@ export function Header() {
             </Button>
 
             <Button variant="ghost" size="icon" asChild aria-label="Account">
-              <Link href={isAuthenticated ? "/account" : "/login"}>
+              <Link href={isAuthenticated ? "/account" : "/auth/login"}>
                 <User className="h-5 w-5" />
                 <span className="sr-only">Account</span>
               </Link>
