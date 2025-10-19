@@ -31,7 +31,7 @@ export function Footer() {
 
           <div>
             <h3 className="text-lg font-semibold mb-4">Shop</h3>
-            <ul className="space-y-2 text-sm">
+            {/* <ul className="space-y-2 text-sm">
               <li>
                 <Link href="/c/skincare" className="text-muted-foreground hover:text-primary transition-colors">
                   Skincare
@@ -52,7 +52,7 @@ export function Footer() {
                   All Brands
                 </Link>
               </li>
-            </ul>
+            </ul> */}
           </div>
 
           <div>
@@ -96,16 +96,16 @@ export function Footer() {
         <div className="mt-8 pt-8 border-t">
           <div className="flex flex-col md:flex-row justify-between items-center gap-4">
             <p className="text-sm text-muted-foreground">
-              © 2024 Made Korea. All rights reserved.
+              © 2025 Made Korea. All rights reserved.
             </p>
-            <div className="flex gap-4 text-sm">
+            {/* <div className="flex gap-4 text-sm">
               <Link href="/admin" className="text-muted-foreground hover:text-primary transition-colors">
                 Admin Portal
               </Link>
               <Link href="/vendor" className="text-muted-foreground hover:text-primary transition-colors">
                 Vendor Portal
               </Link>
-            </div>
+            </div> */}
           </div>
         </div>
       </div>

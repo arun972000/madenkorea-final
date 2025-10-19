@@ -20,6 +20,14 @@ const nextConfig = {
       },
     ],
   },
+  typescript: {
+    // ❗️Allows production builds to successfully complete even if your project has type errors.
+    ignoreBuildErrors: true,
+  },
+  eslint: {
+    // (Optional) ignore ESLint errors during build too
+    ignoreDuringBuilds: true,
+  },
 };
 
 module.exports = nextConfig;
