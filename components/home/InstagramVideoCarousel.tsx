@@ -1,80 +1,219 @@
-'use client';
+"use client";
 
-import { useEffect, useRef, useState } from 'react';
-import type { InfluencerVideo } from '@/types/influencer_video';
-import { Button } from '@/components/ui/button';
-import { ChevronLeft, ChevronRight, Volume2, VolumeX, ExternalLink } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { InfluencerVideo } from "@/types/influencer_video";
+import { Button } from "@/components/ui/button";
+import { Volume2, VolumeX, ExternalLink } from "lucide-react";
 
-export function InstagramVideoCarousel({ videos }: { videos: InfluencerVideo[] }) {
-  const playable = (videos ?? []).filter((v) => !!v.video_url);
+export function InstagramVideoCarousel({
+  videos,
+}: {
+  videos: InfluencerVideo[];
+}) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [canLeft, setCanLeft] = useState(false);
-  const [canRight, setCanRight] = useState(true);
+  const [isPaused, setIsPaused] = useState(false);
+  const [slidesPerView, setSlidesPerView] = useState(6);
+  const [currentPage, setCurrentPage] = useState(0);
 
-  if (!playable.length) return null;
+  const items = useMemo(
+    () => (videos ?? []).filter((v) => !!v.video_url),
+    [videos]
+  );
+  if (!items.length) return null;
 
-  const check = () => {
+  // duplicate once for seamless loop
+  const loopItems = useMemo(
+    () => [
+      ...items,
+      ...items.map((v, i) => ({ ...v, id: `${v.id}-dup-${i}` })),
+    ],
+    [items]
+  );
+
+  const readSlidesFromCSSVar = () => {
     const el = scrollRef.current;
-    if (!el) return;
-    const { scrollLeft, scrollWidth, clientWidth } = el;
-    setCanLeft(scrollLeft > 0);
-    setCanRight(scrollLeft < scrollWidth - clientWidth - 10);
+    if (!el) return slidesPerView;
+    const val = getComputedStyle(el).getPropertyValue("--slides").trim();
+    const n = parseInt(val || "6", 10);
+    return Number.isFinite(n) && n > 0 ? n : slidesPerView;
   };
 
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  useEffect(() => {
-    check();
+  // width of one card + gap
+  const getStep = () => {
     const el = scrollRef.current;
-    if (!el) return;
-    el.addEventListener('scroll', check);
-    return () => el.removeEventListener('scroll', check);
-  }, []);
+    if (!el) return 0;
+    const firstCard = el.querySelector<HTMLElement>('[data-card="true"]');
+    if (!firstCard) return 0;
+    const gap = parseFloat(getComputedStyle(el).gap || "0") || 0;
+    return Math.round(firstCard.getBoundingClientRect().width + gap);
+  };
 
-  const scroll = (dir: 'left' | 'right') => {
+  const alignToSnap = () => {
     const el = scrollRef.current;
     if (!el) return;
-    const amount = 320;
-    el.scrollTo({ left: el.scrollLeft + (dir === 'left' ? -amount : amount), behavior: 'smooth' });
+    const s = getStep();
+    if (!s) return;
+    const idx = Math.round(el.scrollLeft / s);
+    el.scrollLeft = idx * s;
+  };
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(items.length / Math.max(1, slidesPerView))
+  );
+
+  const computeAndSetPage = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const s = getStep();
+    if (!s) return;
+    const idxRaw = Math.round(el.scrollLeft / s);
+    const idx = ((idxRaw % items.length) + items.length) % items.length; // normalize to original set
+    const spv = readSlidesFromCSSVar();
+    const page = Math.floor(idx / Math.max(1, spv));
+    setCurrentPage(Math.min(totalPages - 1, Math.max(0, page)));
+  };
+
+  // autoplay + seamless loop + responsive syncing
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const syncSpv = () => setSlidesPerView(readSlidesFromCSSVar());
+    syncSpv();
+
+    alignToSnap();
+    computeAndSetPage();
+
+    let tickTimer: number | null = null;
+    let afterScrollTimer: number | null = null;
+
+    const tick = () => {
+      if (isPaused) return;
+      const s = getStep();
+      if (!s) return;
+
+      const curIdx = Math.round(el.scrollLeft / s);
+      const targetLeft = (curIdx + 1) * s;
+      el.scrollTo({ left: targetLeft, behavior: "smooth" });
+
+      if (afterScrollTimer) window.clearTimeout(afterScrollTimer);
+      afterScrollTimer = window.setTimeout(() => {
+        const half = el.scrollWidth / 2; // original-set width
+        if (el.scrollLeft >= half - s / 2) {
+          el.scrollLeft = el.scrollLeft - half; // jump back exactly one set
+        }
+        alignToSnap();
+        computeAndSetPage();
+      }, 450) as unknown as number;
+    };
+
+    tickTimer = window.setInterval(tick, 4000) as unknown as number;
+
+    const onScroll = () => {
+      const half = el.scrollWidth / 2;
+      if (el.scrollLeft >= half - 2) el.scrollLeft = el.scrollLeft - half; // seamless
+      computeAndSetPage();
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+
+    const onResize = () => {
+      syncSpv();
+      requestAnimationFrame(() => {
+        alignToSnap();
+        computeAndSetPage();
+      });
+    };
+    window.addEventListener("resize", onResize);
+
+    return () => {
+      if (tickTimer) window.clearInterval(tickTimer);
+      if (afterScrollTimer) window.clearTimeout(afterScrollTimer);
+      el.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [isPaused, items.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const goToPage = (pageIndex: number) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const s = getStep();
+    const spv = readSlidesFromCSSVar();
+    if (!s || !spv) return;
+
+    const half = el.scrollWidth / 2;
+    const pageWidth = s * spv;
+    const targetInFirst = pageIndex * pageWidth;
+    const targetInSecond = targetInFirst + half;
+    const cur = el.scrollLeft;
+    const target =
+      Math.abs(cur - targetInFirst) <= Math.abs(cur - targetInSecond)
+        ? targetInFirst
+        : targetInSecond;
+
+    setIsPaused(true);
+    el.scrollTo({ left: target, behavior: "smooth" });
+    window.setTimeout(() => {
+      alignToSnap();
+      computeAndSetPage();
+      setIsPaused(false);
+    }, 500);
   };
 
   return (
     <section className="relative">
       <div className="text-center mb-8">
         <h2 className="text-3xl font-bold mb-2">Creator Videos</h2>
-        <p className="text-muted-foreground">Short clips from influencers and reviewers</p>
+        <p className="text-muted-foreground">
+          Short clips from influencers and reviewers
+        </p>
       </div>
 
-      <div className="relative group">
-        {canLeft && (
-          <Button
-            variant="secondary"
-            size="icon"
-            className="absolute left-2 top-1/2 -translate-y-1/2 z-10 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
-            onClick={() => scroll('left')}
-          >
-            <ChevronLeft className="h-5 w-5" />
-          </Button>
-        )}
-        {canRight && (
-          <Button
-            variant="secondary"
-            size="icon"
-            className="absolute right-2 top-1/2 -translate-y-1/2 z-10 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
-            onClick={() => scroll('right')}
-          >
-            <ChevronRight className="h-5 w-5" />
-          </Button>
-        )}
-
+      <div
+        className="relative"
+        onMouseEnter={() => setIsPaused(true)}
+        onMouseLeave={() => setIsPaused(false)}
+      >
+        {/* Exact N-per-view sizing via CSS vars; no arrows */}
         <div
           ref={scrollRef}
-          className="flex gap-4 overflow-x-auto scrollbar-hide snap-x snap-mandatory"
-          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+          className="
+            flex overflow-x-auto scrollbar-hide
+            snap-x snap-mandatory [scroll-snap-stop:always]
+            [--slide-gap:1rem] gap-[var(--slide-gap)]
+            [--slides:2] md:[--slides:3] lg:[--slides:4] xl:[--slides:6] 2xl:[--slides:6]
+            [scrollbar-width:none] [-ms-overflow-style:none]
+          "
+          style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
         >
-          {playable.map((v) => (
+          {loopItems.map((v) => (
             <VideoCard key={v.id} video={v} />
           ))}
         </div>
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="mt-4 flex items-center justify-center gap-2">
+            {Array.from({ length: totalPages }).map((_, i) => {
+              const active = i === currentPage;
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  aria-label={`Go to page ${i + 1}`}
+                  aria-current={active ? "page" : undefined}
+                  className={[
+                    "h-2 rounded-full transition-all",
+                    active
+                      ? "w-8 bg-foreground/90"
+                      : "w-2 bg-foreground/30 hover:bg-foreground/50",
+                  ].join(" ")}
+                  onClick={() => goToPage(i)}
+                />
+              );
+            })}
+          </div>
+        )}
       </div>
     </section>
   );
@@ -94,7 +233,9 @@ function VideoCard({ video }: { video: InfluencerVideo }) {
       (entries) => {
         const inView = entries[0]?.isIntersecting ?? false;
         if (inView) {
-          el.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
+          el.play()
+            .then(() => setIsPlaying(true))
+            .catch(() => setIsPlaying(false));
         } else {
           el.pause();
           setIsPlaying(false);
@@ -121,13 +262,20 @@ function VideoCard({ video }: { video: InfluencerVideo }) {
       el.pause();
       setIsPlaying(false);
     } else {
-      el.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
+      el.play()
+        .then(() => setIsPlaying(true))
+        .catch(() => setIsPlaying(false));
     }
   };
 
   return (
     <div
-      className="flex-shrink-0 w-[280px] snap-start relative group cursor-pointer"
+      data-card="true"
+      className="
+        shrink-0 snap-start relative group cursor-pointer
+        basis-[calc((100%-(var(--slide-gap)*(var(--slides)-1)))/var(--slides))]
+        max-w-full
+      "
       onMouseEnter={() => setShowControls(true)}
       onMouseLeave={() => setShowControls(false)}
       onClick={togglePlay}
@@ -141,7 +289,7 @@ function VideoCard({ video }: { video: InfluencerVideo }) {
           playsInline
           poster={video.thumbnail_url ?? undefined}
         >
-          <source src={video.video_url ?? ''} type="video/mp4" />
+          <source src={video.video_url ?? ""} type="video/mp4" />
         </video>
 
         {/* overlay gradient */}
@@ -151,7 +299,9 @@ function VideoCard({ video }: { video: InfluencerVideo }) {
         <div className="absolute bottom-0 left-0 right-0 p-4 text-white">
           {/* <h3 className="font-semibold text-sm mb-1 line-clamp-2">{video.influencer_name}</h3> */}
           {video.caption && (
-            <p className="text-xs text-white/80 mb-2 line-clamp-1">{video.caption}</p>
+            <p className="text-xs text-white/80 mb-2 line-clamp-1">
+              {video.caption}
+            </p>
           )}
           <div className="flex items-center justify-between">
             {/* {typeof video.views === 'number' ? (
@@ -163,7 +313,7 @@ function VideoCard({ video }: { video: InfluencerVideo }) {
                 className="pointer-events-auto"
                 onClick={(e) => {
                   e.stopPropagation();
-                  window.open(video.instagram_link!, '_blank');
+                  window.open(video.instagram_link!, "_blank");
                 }}
               >
                 <ExternalLink className="h-4 w-4 mr-1" />
@@ -185,7 +335,11 @@ function VideoCard({ video }: { video: InfluencerVideo }) {
                 toggleMute();
               }}
             >
-              {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+              {isMuted ? (
+                <VolumeX className="h-4 w-4" />
+              ) : (
+                <Volume2 className="h-4 w-4" />
+              )}
             </Button>
           </div>
         )}

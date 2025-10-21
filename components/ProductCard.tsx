@@ -269,7 +269,11 @@ export function ProductCard({ product }: ProductCardProps) {
           </p>
         )}
 
-        <h3 className="line-clamp-2 font-medium transition-colors group-hover:text-primary">
+        <h3
+          className="font-medium transition-colors group-hover:text-primary
+             overflow-hidden text-ellipsis whitespace-nowrap
+             whitespace-normal md:line-clamp-2"
+        >
           {product.name}
         </h3>
 

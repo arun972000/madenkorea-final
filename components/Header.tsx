@@ -157,10 +157,10 @@ export function Header() {
                 <div className="px-5 py-4 flex items-center justify-between">
                   <Link href="/" className="flex items-center">
                     <Image
-                      src="/squar-logo.png"
+                      src="/logo md.png"
                       alt="Made Korea"
-                      width={48}
-                      height={48}
+                      width={67}
+                      height={28}
                       className="rounded-md"
                       priority
                     />
@@ -260,11 +260,12 @@ export function Header() {
 
             {/* Logo (desktop) */}
             <Link href="/" className="flex items-center">
+           
               <Image
-                src="/squar-logo.png"
+                src="/logo md.png"
                 alt="Made Korea"
-                width={LOGO_PX}
-                height={LOGO_PX}
+                width={133}
+                height={56}
                 className="rounded-md"
                 priority
               />

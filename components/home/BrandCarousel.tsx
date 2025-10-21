@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo, useRef } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { Card } from '../ui/card';
@@ -7,33 +8,68 @@ import {
   Carousel,
   CarouselContent,
   CarouselItem,
-  CarouselNext,
-  CarouselPrevious,
 } from '@/components/ui/carousel';
+import Autoplay from 'embla-carousel-autoplay';
 
 type Brand = {
   id: string;
   slug: string;
   name: string;
-  logo: string;              // public URL
+  logo: string; // public URL
   product_count?: number;
 };
 
 export function BrandCarousel({ brands }: { brands: Brand[] }) {
   if (!brands || brands.length === 0) return null;
 
+  const SLIDES_PER_VIEW_2XL = 7;
+  const MIN_FOR_LOOP = SLIDES_PER_VIEW_2XL * 2; // Embla needs >= 2x slidesInView
+
+  // Duplicate brands only when needed so loop always works
+  const items = useMemo(() => {
+    if (brands.length >= MIN_FOR_LOOP) return brands.map((b, i) => ({ brand: b, key: `${b.id}-${i}` }));
+    const copies = Math.ceil(MIN_FOR_LOOP / brands.length);
+    const out: { brand: Brand; key: string }[] = [];
+    for (let c = 0; c < copies; c++) {
+      for (let i = 0; i < brands.length; i++) {
+        out.push({ brand: brands[i], key: `${brands[i].id}-${c}-${i}` });
+        if (out.length >= MIN_FOR_LOOP) break;
+      }
+      if (out.length >= MIN_FOR_LOOP) break;
+    }
+    return out;
+  }, [brands]);
+
+  const autoplay = useRef(
+    Autoplay({
+      delay: 4000,              // 4s gap
+      stopOnInteraction: false, // keep playing after drag/touch
+      stopOnMouseEnter: true,   // pause on hover
+    })
+  );
+
   return (
     <section>
       <div className="text-center mb-8">
         <h2 className="text-3xl font-bold mb-2">Shop by Brand</h2>
         <p className="text-muted-foreground">
-          Discover products from your favorite K-Beauty brands
+          Discover products from your favorite Korean brands
         </p>
       </div>
 
-      <Carousel opts={{ align: 'start', loop: false }}>
+      <Carousel
+        opts={{
+          align: 'start',
+          loop: true,
+          // dragFree: false, // optional
+          // containScroll: 'trimSnaps', // optional
+        }}
+        plugins={[autoplay.current]}
+        onMouseEnter={autoplay.current.stop}
+        onMouseLeave={autoplay.current.reset}
+      >
         <CarouselContent>
-          {brands.map((brand) => {
+          {items.map(({ brand, key }) => {
             const hasProducts = (brand.product_count ?? 0) > 0;
 
             const CardInner = (
@@ -44,26 +80,30 @@ export function BrandCarousel({ brands }: { brands: Brand[] }) {
                 ].join(' ')}
               >
                 <div className="relative w-full aspect-square mb-3">
-                  <Image src={brand.logo} alt={brand.name} fill className="object-contain" />
+                  <Image
+                    src={brand.logo}
+                    alt={brand.name}
+                    fill
+                    className="object-contain"
+                    sizes="(min-width:1536px) 14.3vw, (min-width:1280px) 16.6vw, (min-width:1024px) 20vw, (min-width:640px) 33.3vw, 50vw"
+                  />
                 </div>
                 <h3 className="font-semibold text-center">{brand.name}</h3>
-                {/* {typeof brand.product_count === 'number' && (
-                  <p className="text-sm text-muted-foreground text-center">
-                    {brand.product_count} products
-                  </p>
-                )} */}
               </Card>
             );
 
             return (
               <CarouselItem
-                key={brand.id}
-                className="basis-1/2 sm:basis-1/3 lg:basis-1/5" // 2/3/4 per view
+                key={key}
+                className="
+                  basis-1/2 sm:basis-1/3 md:basis-1/4
+                  lg:basis-1/5 xl:basis-1/6
+                  2xl:basis-[14.2857%]   /* 1/7 at 2XL */
+                "
               >
                 {hasProducts ? (
                   <Link href={`/brand/${brand.slug}`}>{CardInner}</Link>
                 ) : (
-                  // No link when product_count is 0
                   <div aria-disabled="true" className="pointer-events-none">
                     {CardInner}
                   </div>
@@ -73,8 +113,7 @@ export function BrandCarousel({ brands }: { brands: Brand[] }) {
           })}
         </CarouselContent>
 
-        <CarouselPrevious />
-        <CarouselNext />
+        {/* Navigation removed per request */}
       </Carousel>
     </section>
   );

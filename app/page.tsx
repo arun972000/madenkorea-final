@@ -17,6 +17,7 @@ import {
 } from "@/lib/mock-data";
 import { createClient } from "@supabase/supabase-js";
 import HomeVideoCarouselSection from "@/components/home/HomeVideoCarouselSection";
+import CertificationSwiper from "@/components/Cetifications";
 
 export const revalidate = 300; // ISR: refresh the home data every 5 minutes
 
@@ -169,7 +170,7 @@ export default async function Home() {
         {featuredProducts.length > 0 && (
           <EditorialSection
             title="Featured Products"
-            description="Hand-picked selections from our beauty experts"
+            description=""
             products={featuredProducts}
           />
         )}
@@ -177,6 +178,7 @@ export default async function Home() {
         {influencerVideos.length > 0 && (
           <InstagramVideoCarousel videos={influencerVideos} />
         )}
+        <CertificationSwiper />
       </div>
     </CustomerLayout>
   );

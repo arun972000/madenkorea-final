@@ -11,7 +11,7 @@ import Script from "next/script";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Made Korea - Premium Korean Beauty & Cosmetics",
+  title: "Made Korea - Premium Korean products",
   description:
     "Discover authentic Korean beauty products, skincare, makeup, and more from top Consumer Innovations brands",
   keywords: [
