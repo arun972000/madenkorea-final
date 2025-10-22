@@ -758,7 +758,7 @@ export default function ProductPage() {
         hasIngredients && { key: "ingredients", label: "Ingredients" },
         hasBenefits && { key: "benefits", label: "Benefits" },
         hasFaq && { key: "faq", label: "FAQ" },
-        hasAdditional && { key: "additional", label: "Additional Benefits" },
+        hasAdditional && { key: "additional", label: "Informations" },
         // Reviews tab always present (let users write one even if none yet)
         {
           key: "reviews",
