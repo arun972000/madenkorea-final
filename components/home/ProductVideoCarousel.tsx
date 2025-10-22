@@ -164,7 +164,7 @@ export function ProductVideoCarousel({ videos = [] }: ProductVideoCarouselProps)
   return (
     <section className="relative">
       <div className="text-center mb-8">
-        <h2 className="text-3xl font-bold mb-2">대한 드리유 - KOREA'S BEST FOR YOU</h2>
+        <h2 className="text-3xl font-bold mb-2">한국 최고 상품을 드려요! - KOREA'S BEST FOR YOU</h2>
         <p className="text-muted-foreground">
           Watch and discover the best Consumer Innovations products in action
         </p>

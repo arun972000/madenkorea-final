@@ -75,13 +75,13 @@ export function BrandCarousel({ brands }: { brands: Brand[] }) {
             const CardInner = (
               <Card
                 className={[
-                  'p-6 transition-shadow h-full flex flex-col items-center justify-center',
+                  'p-6 h-full flex flex-col items-center justify-center',
                   hasProducts ? 'hover:shadow-lg cursor-pointer' : 'opacity-60 cursor-not-allowed',
                 ].join(' ')}
               >
                 <div className="relative w-full aspect-square mb-3">
                   <Image
-                    src={brand.logo}
+                    src={brand.logo} 
                     alt={brand.name}
                     fill
                     className="object-contain"
@@ -96,7 +96,7 @@ export function BrandCarousel({ brands }: { brands: Brand[] }) {
               <CarouselItem
                 key={key}
                 className="
-                  basis-1/2 sm:basis-1/3 md:basis-1/4
+                  basis-1/3 sm:basis-1/4 md:basis-1/5
                   lg:basis-1/5 xl:basis-1/6
                   2xl:basis-[14.2857%]   /* 1/7 at 2XL */
                 "

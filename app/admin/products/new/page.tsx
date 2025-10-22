@@ -1,34 +1,34 @@
-'use client';
+"use client";
 
-import { useRouter } from 'next/navigation';
-import { useAuth } from '@/lib/contexts/AuthContext';
-import { Button } from '@/components/ui/button';
-import { LogOut } from 'lucide-react';
-import { ProductForm } from '@/components/admin/ProductForm';
-import { toast } from 'sonner';
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/lib/contexts/AuthContext";
+import { Button } from "@/components/ui/button";
+import { LogOut } from "lucide-react";
+import { ProductForm } from "@/components/admin/ProductForm";
+import { toast } from "sonner";
 
 export default function NewProductPage() {
   const router = useRouter();
   const { user, hasRole, logout } = useAuth();
 
-  if (!hasRole('admin')) {
-    router.push('/admin');
+  if (!hasRole("admin")) {
+    router.push("/admin");
     return null;
   }
 
   const handleLogout = async () => {
     await logout();
-    toast.success('Logged out successfully');
-    router.push('/');
+    toast.success("Logged out successfully");
+    router.push("/");
   };
 
   const handleSave = (product: any) => {
-    toast.success('Product created successfully');
-    router.push('/admin/products');
+    toast.success("Product created successfully");
+    router.push("/admin/products");
   };
 
   const handleCancel = () => {
-    router.push('/admin/products');
+    router.push("/admin/products");
   };
 
   return (
@@ -36,7 +36,10 @@ export default function NewProductPage() {
       <header className="border-b bg-background">
         <div className="container mx-auto py-4 flex justify-between items-center">
           <div className="flex items-center gap-4">
-            <Button variant="ghost" onClick={() => router.push('/admin/products')}>
+            <Button
+              variant="ghost"
+              onClick={() => router.push("/admin/products")}
+            >
               ← Back
             </Button>
             <h1 className="text-2xl font-bold">New Product</h1>

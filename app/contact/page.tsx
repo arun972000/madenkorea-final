@@ -59,7 +59,7 @@ export default function ContactPage() {
               <Mail className="h-10 w-10 mx-auto mb-4 text-primary" />
               <h3 className="font-semibold mb-2">Email</h3>
               <p className="text-sm text-muted-foreground">
-                support@madekorea.com
+                info@madekorea.com
               </p>
             </CardContent>
           </Card>

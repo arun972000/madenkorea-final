@@ -7,7 +7,7 @@ export default function PrivacyPage() {
         <div className="max-w-4xl mx-auto">
           <h1 className="text-4xl font-bold mb-6">Privacy Policy</h1>
           <p className="text-muted-foreground mb-8">
-            Last updated: October 8, 2024
+            Last updated: October 8, 2025
           </p>
 
           <div className="prose prose-lg max-w-none">
@@ -173,15 +173,15 @@ export default function PrivacyPage() {
               </p>
               <ul className="list-none space-y-2 text-muted-foreground mb-4">
                 <li>
-                  <strong>Email:</strong> privacy@madekorea.com
+                  <strong>Email:</strong> info@madekorea.com
                 </li>
-                <li>
+                {/* <li>
                   <strong>Phone:</strong> +91 1800 123 4567
                 </li>
                 <li>
                   <strong>Address:</strong> 123 Consumer Innovations Street,
                   Mumbai, Maharashtra 400001, India
-                </li>
+                </li> */}
               </ul>
             </section>
           </div>

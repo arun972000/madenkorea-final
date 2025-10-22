@@ -214,7 +214,7 @@ export function Header() {
                         </AccordionTrigger>
                         <AccordionContent>
                           <ul className="space-y-1">
-                            <li>
+                            {/* <li>
                               <Link
                                 href={"/brands"}
                                 className="flex items-center justify-between rounded-lg px-3 py-2 text-sm hover:bg-accent"
@@ -222,7 +222,7 @@ export function Header() {
                                 <span>All Brands</span>
                                 <ChevronRight className="h-4 w-4 opacity-60" />
                               </Link>
-                            </li>
+                            </li> */}
                             {sortedBrands.map((b) => {
                               const disabled = (b.product_count ?? 0) === 0;
                               return (
