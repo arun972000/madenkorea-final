@@ -323,7 +323,7 @@ export function Header() {
                     </NavigationMenuTrigger>
                     <NavigationMenuContent>
                       <div className="grid w-[720px] max-w-[90vw] grid-cols-2 gap-2 p-4 md:grid-cols-3 lg:grid-cols-4">
-                        <Link
+                        {/* <Link
                           href={"/brands"}
                           className="rounded-lg p-3 text-sm hover:bg-accent"
                         >
@@ -331,7 +331,7 @@ export function Header() {
                           <div className="text-xs text-muted-foreground">
                             Explore All
                           </div>
-                        </Link>
+                        </Link> */}
 
                         {topBrands.map((b) => {
                           const disabled = (b.product_count ?? 0) === 0;

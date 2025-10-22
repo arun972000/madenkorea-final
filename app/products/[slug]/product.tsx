@@ -1203,7 +1203,7 @@ export default function ProductPage() {
                     <TabsContent value="description" className="mt-6">
                       <Card>
                         <CardContent className="p-6 space-y-4">
-                          <h3 className="text-base font-semibold">Overview</h3>
+                          {/* <h3 className="text-base font-semibold">Overview</h3> */}
                           <p className="text-sm leading-6">
                             {product!.description}
                           </p>
@@ -1217,9 +1217,9 @@ export default function ProductPage() {
                     <TabsContent value="ingredients" className="mt-6">
                       <Card>
                         <CardContent className="p-6 space-y-4">
-                          <h3 className="text-base font-semibold">
+                          {/* <h3 className="text-base font-semibold">
                             Ingredients
-                          </h3>
+                          </h3> */}
                           <Markdown>{product!.ingredients_md!}</Markdown>
                         </CardContent>
                       </Card>
@@ -1231,7 +1231,7 @@ export default function ProductPage() {
                     <TabsContent value="benefits" className="mt-6">
                       <Card>
                         <CardContent className="p-6 space-y-4">
-                          <h3 className="text-base font-semibold">Benefits</h3>
+                          {/* <h3 className="text-base font-semibold">Benefits</h3> */}
                           {product?.key_features_md?.trim() && (
                             <Markdown>{product.key_features_md!}</Markdown>
                           )}
@@ -1253,7 +1253,7 @@ export default function ProductPage() {
                     <TabsContent value="faq" className="mt-6">
                       <Card>
                         <CardContent className="p-6 space-y-3">
-                          <h3 className="text-base font-semibold">FAQ</h3>
+                          {/* <h3 className="text-base font-semibold">FAQ</h3> */}
                           <div className="grid gap-3">
                             {parsedFaqs.map((f, i) => (
                               <div key={i} className="rounded-md border p-3">
@@ -1274,9 +1274,9 @@ export default function ProductPage() {
                     <TabsContent value="additional" className="mt-6">
                       <Card>
                         <CardContent className="p-6 space-y-4">
-                          <h3 className="text-base font-semibold">
+                          {/* <h3 className="text-base font-semibold">
                             Additional Benefits
-                          </h3>
+                          </h3> */}
                           <Markdown>{product!.additional_details_md!}</Markdown>
                         </CardContent>
                       </Card>
