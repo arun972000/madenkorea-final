@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+
 import {
   Heart,
   ShoppingCart,
@@ -197,8 +199,6 @@ function maskEmail(email?: string | null) {
   return `${masked}@${domain}`;
 }
 
-
-
 async function currentUserDisplay() {
   const { data } = await supabase.auth.getUser();
   const user = data.user;
@@ -217,7 +217,7 @@ export default function ProductPage() {
   const slug = (params?.slug as string) || (params?.handle as string);
   const { addItem } = useCart();
   const { toggleWishlist, isInWishlist } = useWishlist();
-const [showShare, setShowShare] = useState(false);
+  const [showShare, setShowShare] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [product, setProduct] = useState<Product | null>(null);
@@ -258,47 +258,52 @@ const [showShare, setShowShare] = useState(false);
     };
   }, []);
 
-const shareUrl = useMemo(
-  () => (typeof window !== "undefined" ? window.location.href : ""),
-  [slug]
-);
-const shareTitle = product?.name ?? "Check this out";
-const shareText =
-  product?.short_description ??
-  "Found this on K-beauty store — thought you might like it!";
-const encodedUrl = encodeURIComponent(shareUrl);
-const encodedText = encodeURIComponent(`${shareTitle} — ${shareText}`);
+  const shareUrl = useMemo(
+    () => (typeof window !== "undefined" ? window.location.href : ""),
+    [slug]
+  );
+  const shareTitle = product?.name ?? "Check this out";
+  const shareText =
+    product?.short_description ??
+    "Found this on K-beauty store — thought you might like it!";
+  const encodedUrl = encodeURIComponent(shareUrl);
+  const encodedText = encodeURIComponent(`${shareTitle} — ${shareText}`);
 
-const shareLinks = {
-  whatsapp: `https://wa.me/?text=${encodedText}%20${encodedUrl}`,
-  telegram: `https://t.me/share/url?url=${encodedUrl}&text=${encodedText}`,
-  twitter: `https://twitter.com/intent/tweet?text=${encodedText}&url=${encodedUrl}`,
-  facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`,
-  linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${encodedUrl}`,
-  email: `mailto:?subject=${encodeURIComponent(shareTitle)}&body=${encodedText}%0A${encodedUrl}`,
-};
+  const shareLinks = {
+    whatsapp: `https://wa.me/?text=${encodedText}%20${encodedUrl}`,
+    telegram: `https://t.me/share/url?url=${encodedUrl}&text=${encodedText}`,
+    twitter: `https://twitter.com/intent/tweet?text=${encodedText}&url=${encodedUrl}`,
+    facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`,
+    linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${encodedUrl}`,
+    email: `mailto:?subject=${encodeURIComponent(
+      shareTitle
+    )}&body=${encodedText}%0A${encodedUrl}`,
+  };
 
-async function handleShareClick() {
-  if (typeof navigator !== "undefined" && (navigator as any).share) {
+  async function handleShareClick() {
+    if (typeof navigator !== "undefined" && (navigator as any).share) {
+      try {
+        await (navigator as any).share({
+          title: shareTitle,
+          text: shareText,
+          url: shareUrl,
+        });
+        return;
+      } catch {
+        // user canceled or not supported -> fall through to dialog
+      }
+    }
+    setShowShare(true);
+  }
+
+  async function copyLink() {
     try {
-      await (navigator as any).share({ title: shareTitle, text: shareText, url: shareUrl });
-      return;
+      await navigator.clipboard.writeText(shareUrl);
+      toast.success("Link copied to clipboard");
     } catch {
-      // user canceled or not supported -> fall through to dialog
+      toast.error("Couldn’t copy. Long-press the link to copy.");
     }
   }
-  setShowShare(true);
-}
-
-async function copyLink() {
-  try {
-    await navigator.clipboard.writeText(shareUrl);
-    toast.success("Link copied to clipboard");
-  } catch {
-    toast.error("Couldn’t copy. Long-press the link to copy.");
-  }
-}
-
 
   // Fetch product + images
   useEffect(() => {
@@ -814,6 +819,33 @@ async function copyLink() {
     );
   };
 
+  // ---- Mobile tabs scrolling helpers ----
+  const [tabValue, setTabValue] = useState<string>(firstTabValue);
+  useEffect(() => setTabValue(firstTabValue), [firstTabValue]);
+
+  const tabsStripRef = useRef<HTMLDivElement>(null);
+  const tabBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+
+  function scrollTabs(dx: number) {
+    const el = tabsStripRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dx, behavior: "smooth" });
+  }
+
+  // When a tab is chosen, scroll it into view (center-ish)
+  function onChangeTab(v: string) {
+    setTabValue(v);
+    const el = tabBtnRefs.current[v];
+    const strip = tabsStripRef.current;
+    if (el && strip) {
+      el.scrollIntoView({
+        behavior: "smooth",
+        inline: "center",
+        block: "nearest",
+      });
+    }
+  }
+
   return (
     <CustomerLayout>
       <div className="container mx-auto py-8">
@@ -1012,7 +1044,7 @@ async function copyLink() {
                     <ShoppingCart className="mr-2 h-5 w-5" />
                     Add to Cart
                   </Button>
-
+                  {/* 
                   <Button
                     size="lg"
                     variant="outline"
@@ -1023,17 +1055,20 @@ async function copyLink() {
                         inWishlist ? "fill-red-500 text-red-500" : ""
                       }`}
                     />
-                  </Button>
+                  </Button> */}
                 </div>
 
                 {/* Share + shipping highlights */}
                 <div className="flex items-center gap-4 pt-6 border-t">
-  <Button variant="outline" className="flex-1" onClick={handleShareClick}>
-    <Share2 className="mr-2 h-4 w-4" />
-    Share
-  </Button>
-</div>
-
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    onClick={handleShareClick}
+                  >
+                    <Share2 className="mr-2 h-4 w-4" />
+                    Share
+                  </Button>
+                </div>
 
                 <Card className="mt-6">
                   <CardContent className="p-4 space-y-4">
@@ -1115,22 +1150,53 @@ async function copyLink() {
 
             {tabs.length > 0 && (
               <div className="mt-12">
-                <Tabs defaultValue={firstTabValue} className="w-full">
-                  <TabsList
-                    aria-label="Product information tabs"
-                    className="flex w-full gap-2 p-1 overflow-x-auto sm:overflow-visible"
-                    style={{ WebkitOverflowScrolling: "touch" }}
-                  >
-                    {tabs.map((t) => (
-                      <TabsTrigger
-                        key={t.key}
-                        value={t.key}
-                        className="flex-shrink-0 whitespace-nowrap px-3 py-2 text-xs sm:text-sm"
-                      >
-                        {t.label}
-                      </TabsTrigger>
-                    ))}
-                  </TabsList>
+                <Tabs
+                  value={tabValue}
+                  onValueChange={onChangeTab}
+                  className="w-full"
+                >
+                  <div className="relative">
+                    {/* Horizontal, scrollable tab strip */}
+                    <TabsList
+                      ref={tabsStripRef}
+                      aria-label="Product information tabs"
+                      className="flex w-full gap-2 p-1 overflow-x-auto no-scrollbar snap-x snap-mandatory scroll-px-3 sm:overflow-visible"
+                      style={{ WebkitOverflowScrolling: "touch" }}
+                      role="tablist"
+                    >
+                      {tabs.map((t) => (
+                        <TabsTrigger
+                          key={t.key}
+                          value={t.key}
+                          ref={(el) => (tabBtnRefs.current[t.key] = el)}
+                          className="flex-shrink-0 whitespace-nowrap px-3 py-2 text-xs sm:text-sm snap-start"
+                        >
+                          {t.label}
+                        </TabsTrigger>
+                      ))}
+                    </TabsList>
+
+                    {/* Fade edges + scroll buttons (mobile only) */}
+                    <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-background to-transparent md:hidden" />
+                    <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-background to-transparent md:hidden" />
+
+                    <button
+                      type="button"
+                      aria-label="Scroll tabs left"
+                      onClick={() => scrollTabs(-160)}
+                      className="md:hidden absolute left-0 top-1/2 -translate-y-1/2 p-1 rounded-full bg-background/80 border shadow-sm"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Scroll tabs right"
+                      onClick={() => scrollTabs(160)}
+                      className="md:hidden absolute right-0 top-1/2 -translate-y-1/2 p-1 rounded-full bg-background/80 border shadow-sm"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
 
                   {/* Description */}
                   {hasDescription && (
@@ -1569,63 +1635,82 @@ async function copyLink() {
         </DialogContent>
       </Dialog>
 
-<Dialog open={showShare} onOpenChange={setShowShare}>
-  <DialogContent className="sm:max-w-md">
-    <DialogHeader>
-      <DialogTitle>Share this product</DialogTitle>
-    </DialogHeader>
+      <Dialog open={showShare} onOpenChange={setShowShare}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Share this product</DialogTitle>
+          </DialogHeader>
 
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-        <Button asChild variant="outline">
-          <a href={shareLinks.whatsapp} target="_blank" rel="noopener noreferrer">
-            <MessageCircle className="h-4 w-4 mr-2" /> WhatsApp
-          </a>
-        </Button>
-        <Button asChild variant="outline">
-          <a href={shareLinks.telegram} target="_blank" rel="noopener noreferrer">
-            <Send className="h-4 w-4 mr-2" /> Telegram
-          </a>
-        </Button>
-        <Button asChild variant="outline">
-          <a href={shareLinks.twitter} target="_blank" rel="noopener noreferrer">
-            <Send className="h-4 w-4 mr-2" /> X / Twitter
-          </a>
-        </Button>
-        <Button asChild variant="outline">
-          <a href={shareLinks.facebook} target="_blank" rel="noopener noreferrer">
-            <Send className="h-4 w-4 mr-2" /> Facebook
-          </a>
-        </Button>
-        <Button asChild variant="outline">
-          <a href={shareLinks.linkedin} target="_blank" rel="noopener noreferrer">
-            <Send className="h-4 w-4 mr-2" /> LinkedIn
-          </a>
-        </Button>
-        <Button asChild variant="outline">
-          <a href={shareLinks.email}>
-            <Mail className="h-4 w-4 mr-2" /> Email
-          </a>
-        </Button>
-      </div>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <Button asChild variant="outline">
+                <a
+                  href={shareLinks.whatsapp}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <MessageCircle className="h-4 w-4 mr-2" /> WhatsApp
+                </a>
+              </Button>
+              <Button asChild variant="outline">
+                <a
+                  href={shareLinks.telegram}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <Send className="h-4 w-4 mr-2" /> Telegram
+                </a>
+              </Button>
+              <Button asChild variant="outline">
+                <a
+                  href={shareLinks.twitter}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <Send className="h-4 w-4 mr-2" /> X / Twitter
+                </a>
+              </Button>
+              <Button asChild variant="outline">
+                <a
+                  href={shareLinks.facebook}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <Send className="h-4 w-4 mr-2" /> Facebook
+                </a>
+              </Button>
+              <Button asChild variant="outline">
+                <a
+                  href={shareLinks.linkedin}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <Send className="h-4 w-4 mr-2" /> LinkedIn
+                </a>
+              </Button>
+              <Button asChild variant="outline">
+                <a href={shareLinks.email}>
+                  <Mail className="h-4 w-4 mr-2" /> Email
+                </a>
+              </Button>
+            </div>
 
-      <Separator />
+            <Separator />
 
-      <div className="flex gap-2 items-center">
-        <Input readOnly value={shareUrl} className="text-xs" />
-        <Button variant="secondary" onClick={copyLink}>
-          <Copy className="h-4 w-4 mr-2" /> Copy
-        </Button>
-      </div>
+            <div className="flex gap-2 items-center">
+              <Input readOnly value={shareUrl} className="text-xs" />
+              <Button variant="secondary" onClick={copyLink}>
+                <Copy className="h-4 w-4 mr-2" /> Copy
+              </Button>
+            </div>
 
-      <div className="flex items-center text-xs text-muted-foreground">
-        <LinkIcon className="h-3 w-3 mr-1" />
-        Sharing the current page URL
-      </div>
-    </div>
-  </DialogContent>
-</Dialog>
-
+            <div className="flex items-center text-xs text-muted-foreground">
+              <LinkIcon className="h-3 w-3 mr-1" />
+              Sharing the current page URL
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* WRITE REVIEW DIALOG */}
       <Dialog open={showReviewDialog} onOpenChange={setShowReviewDialog}>
@@ -1640,8 +1725,6 @@ async function copyLink() {
         </DialogContent>
       </Dialog>
     </CustomerLayout>
-
-    
   );
 }
 

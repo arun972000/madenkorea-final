@@ -16,6 +16,18 @@
   }
 }
 
+/* Hide horizontal scrollbar on mobile while keeping scrollability */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+
+/* app/globals.css */
+.tab-arrow {
+  width: 44px;           /* keep arrows a fixed width */
+  height: 32px;
+}
+
+
 @layer base {
   :root {
     --background: 0 0% 100%;
