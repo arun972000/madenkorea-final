@@ -28,7 +28,7 @@ export function Footer() {
             <div className="flex flex-col items-center">
               {/* replace src with your seal/logo path */}
               <img
-                src="logo-footer.png"
+                src="/logo-footer.png"
                 alt="Made in Korea Product seal"
                 className="h-20 w-20 object-contain"
                 loading="lazy"

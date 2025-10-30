@@ -160,6 +160,15 @@ const safeJSON = (s?: string | null) => {
   }
 };
 
+// put near your other helpers
+const safeKeyPart = (s: string) =>
+  s
+    .normalize('NFKC')      // normalize unicode (kills NBSP surprises)
+    .trim()                 // remove leading/trailing whitespace
+    .replace(/\s+/g, '-')   // collapse spaces -> dashes
+    .replace(/[^\w.\-]/g, '') // keep [A-Za-z0-9 _ . -], drop the rest
+
+
 const parseBenefits = (v: any): string[] => {
   const s = (v ?? "").toString().trim();
   if (!s) return [];
@@ -654,6 +663,8 @@ export function ProductForm(_props: ProductFormProps) {
       return false;
     }
 
+
+    
     const [catRes, brRes] = await Promise.all([
       supabase.from("categories").select("slug"),
       supabase.from("brands").select("slug"),
@@ -666,9 +677,13 @@ export function ProductForm(_props: ProductFormProps) {
     const isNonNeg = (v: any) => v == null || Number(v) >= 0;
 
     for (let i = 0; i < bulkProducts.length; i++) {
+
+      
       const p = bulkProducts[i]!;
       const label = p.slug || p.sku || `row#${i + 2}`;
 
+
+      
       const missing: string[] = [];
       if (!p.sku) missing.push("sku");
       if (!p.slug) missing.push("slug");
@@ -784,41 +799,50 @@ export function ProductForm(_props: ProductFormProps) {
   };
 
   /* ------------------------------- Upload images --------------------------------- */
-  const bulkUploadImages = async () => {
-    setBulkBusy(true);
-    setBulkProgressMsg("Uploading images…");
-    setBulkProgress(0);
-    try {
-      const taskMap = new Map<string, File>();
-      for (const m of bulkMedia) {
-        const f = bulkMediaFileMap.get(m.filename);
-        if (f) taskMap.set(`${m.sku}/${m.filename}`, f);
-      }
-      const tasks = Array.from(taskMap.entries()).map(([key, file]) => ({
-        key,
-        file,
-      }));
-      let done = 0;
-      await mapLimit(tasks, 3, async (t) => {
-        const { error } = await supabase.storage
-          .from("product-media")
-          .upload(t.key, t.file, {
-            upsert: bulkOverwriteImages,
-            cacheControl: "3600",
-            contentType: t.file.type || undefined,
-          });
-        if (error) throw new Error(`${t.key}: ${error.message}`);
-        done += 1;
-        setBulkProgress(Math.round((done / tasks.length) * 100));
-      });
-      toast.success("Images uploaded");
-    } catch (e: any) {
-      toast.error(e.message || "Upload failed");
-    } finally {
-      setBulkProgressMsg("");
-      setBulkBusy(false);
+const bulkUploadImages = async () => {
+  setBulkBusy(true);
+  setBulkProgressMsg("Uploading images…");
+  setBulkProgress(0);
+
+  try {
+    const tasks: { key: string; file: File }[] = [];
+
+    for (const m of bulkMedia) {
+      const f = bulkMediaFileMap.get(m.filename);
+      if (!f) continue;
+
+      const safeSku  = safeKeyPart(m.sku || '');
+      const safeName = safeKeyPart(m.filename);
+      const key      = `${safeSku}/${safeName}`;
+
+      // rename the browser File so DB + storage match
+      const renamed = new File([f], safeName, { type: f.type });
+      tasks.push({ key, file: renamed });
     }
-  };
+
+    let done = 0;
+    await mapLimit(tasks, 3, async (t) => {
+      const { error } = await supabase.storage
+        .from("product-media")
+        .upload(t.key, t.file, {
+          upsert: bulkOverwriteImages,
+          cacheControl: "3600",
+          contentType: t.file.type || undefined,
+        });
+      if (error) throw new Error(`${t.key}: ${error.message}`);
+      done += 1;
+      setBulkProgress(Math.round((done / tasks.length) * 100));
+    });
+
+    toast.success("Images uploaded");
+  } catch (e: any) {
+    toast.error(e?.message || "Upload failed");
+  } finally {
+    setBulkProgressMsg("");
+    setBulkBusy(false);
+  }
+};
+
 
   /* ------------------------------- Upsert DB --------------------------------- */
  /* ------------------------------- Upsert DB --------------------------------- */
@@ -884,8 +908,13 @@ const bulkUpsertAll = async (): Promise<{ ok: boolean; issues: string[] }> => {
       continue;
     }
 
-    const heroPath = p.hero_image_filename ? `${p.sku}/${p.hero_image_filename}` : null;
-    const ogPath   = p.og_image_filename   ? `${p.sku}/${p.og_image_filename}`   : null;
+  const safeSku  = safeKeyPart(p.sku || '');
+  const heroPath = p.hero_image_filename
+    ? `${safeSku}/${safeKeyPart(p.hero_image_filename)}`
+    : null;
+  const ogPath   = p.og_image_filename
+    ? `${safeSku}/${safeKeyPart(p.og_image_filename)}`
+    : null;
 
     const payload = {
       // core
@@ -942,6 +971,11 @@ const bulkUpsertAll = async (): Promise<{ ok: boolean; issues: string[] }> => {
       .select("id")
       .single();
 
+      // Optional cleanup
+  if (bulkReplaceImages) {
+    await supabase.from("product_images").delete().eq("product_id", prodRow.id);
+  }
+
     if (upErr || !prodRow?.id) {
       issues.push(`Upsert failed '${label}': ${upErr?.message ?? "no id returned"}`);
       continue;
@@ -958,7 +992,7 @@ const bulkUpsertAll = async (): Promise<{ ok: boolean; issues: string[] }> => {
     if (mediaRows.length) {
       const rowsToInsert = mediaRows.map((m) => ({
         product_id,
-        storage_path: `${p.sku}/${m.filename}`,
+        storage_path: `${safeSku}/${safeKeyPart(m.filename)}`,
         alt: m.alt ?? null,
         sort_order: m.sort_order ?? 0,
       }));
