@@ -89,22 +89,31 @@ export function Footer() {
           </div>
 
           {/* Column 5: Newsletter */}
-          <div className="flex gap-2">
-            <Button variant="link" size="icon" className="border-white/40">
-              <Facebook className="h-4 w-4 text-white" />
-            </Button>
-            <Button variant="link" size="icon" className="border-white/40">
-              <Instagram className="h-4 w-4 text-white" />
-            </Button>
-            <Button variant="link" size="icon" className="border-white/40">
-              <Twitter className="h-4 w-4 text-white" />
-            </Button>
-            <Button variant="link" size="icon" className="border-white/40">
-              <Youtube className="h-4 w-4 text-white" />
-            </Button>
+          <div className="flex flex-col items-center gap-4">
+            <div className="flex gap-2">
+              <Button variant="link" size="icon" className="border-white/40">
+                <Facebook className="h-4 w-4 text-white" />
+              </Button>
+              <Button variant="link" size="icon" className="border-white/40">
+                <Instagram className="h-4 w-4 text-white" />
+              </Button>
+              <Button variant="link" size="icon" className="border-white/40">
+                <Twitter className="h-4 w-4 text-white" />
+              </Button>
+              <Button variant="link" size="icon" className="border-white/40">
+                <Youtube className="h-4 w-4 text-white" />
+              </Button>
+            </div>
+
+            <img
+              src="/madenkorea secondary logo.png"
+              alt="Made in Korea Product seal"
+              className="h-20 w-20 object-contain"
+              loading="lazy"
+              decoding="async"
+            />
           </div>
         </div>
-
       </div>
     </footer>
   );

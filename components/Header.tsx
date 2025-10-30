@@ -157,7 +157,7 @@ export function Header() {
                 <div className="px-5 py-4 flex items-center justify-between">
                   <Link href="/" className="flex items-center">
                     <Image
-                      src="/logo md.png"
+                      src="/logo gif.gif"
                       alt="Made Korea"
                       width={67}
                       height={28}
@@ -253,6 +253,9 @@ export function Header() {
                         </AccordionContent>
                       </AccordionItem>
                     </Accordion>
+
+                    <div className="mt-4"><Link href='/services' className="text-base ">Services</Link></div>
+
                   </nav>
                 </ScrollArea>
               </SheetContent>
@@ -262,7 +265,7 @@ export function Header() {
             <Link href="/" className="flex items-center">
            
               <Image
-                src="/logo md.png"
+                src="/logo gif.gif"
                 alt="Made Korea"
                 width={133}
                 height={56}
@@ -366,6 +369,9 @@ export function Header() {
                       </div>
                     </NavigationMenuContent>
                   </NavigationMenuItem>
+                  <NavigationMenuList className="text-sm">
+                    <Link href='/services'>Services</Link>
+                  </NavigationMenuList> 
                 </NavigationMenuList>
               </NavigationMenu>
             </nav>
