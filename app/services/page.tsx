@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   MapPin,
   BadgeCheck,
+  Mail, // ✅ added
 } from "lucide-react";
 
 export default function CdscoRegulatorySupportPage() {
@@ -26,6 +27,17 @@ export default function CdscoRegulatorySupportPage() {
             End-to-end assistance for registering imported cosmetics in India — from dossier preparation and SUGAM filing
             to approvals, labeling, and post-approval compliance.
           </p>
+
+          {/* ✅ Email (Hero) */}
+          <div className="mt-4 flex items-center justify-center gap-2 text-sm">
+            <Mail className="h-4 w-4 text-primary" />
+            <a
+              href="mailto:info@makenkorea.com"
+              className="font-medium underline underline-offset-4 hover:no-underline"
+            >
+              info@makenkorea.com
+            </a>
+          </div>
         </div>
 
         {/* Highlights */}
@@ -160,12 +172,8 @@ export default function CdscoRegulatorySupportPage() {
               <div className="relative border-b bg-gradient-to-r from-primary/15 via-primary/10 to-transparent">
                 <div className="mx-auto max-w-5xl px-6 py-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                   <div className="flex items-start gap-3">
-                   
-                    <div>
-                      <div className="text-2xl font-semibold leading-tight">
-                        Compliance & Certification Standards
-                      </div>
-                    
+                    <div className="text-2xl font-semibold leading-tight">
+                      Compliance & Certification Standards
                     </div>
                   </div>
 
@@ -301,6 +309,17 @@ export default function CdscoRegulatorySupportPage() {
                   Room 1119, 416, Hwagok-ro, Gangseo-gu, Seoul{"\n"}
                   07548, Rep. of Korea
                 </p>
+
+                {/* ✅ Email (Korea office card) */}
+                <p className="mt-3 text-sm">
+                  Email:{" "}
+                  <a
+                    href="mailto:info@makenkorea.com"
+                    className="font-medium underline underline-offset-4 hover:no-underline"
+                  >
+                    info@makenkorea.com
+                  </a>
+                </p>
               </CardContent>
             </Card>
           </div>
@@ -361,6 +380,17 @@ export default function CdscoRegulatorySupportPage() {
                 <h3 className="text-2xl font-semibold mb-2">Ready to register your brand for India?</h3>
                 <p className="text-muted-foreground">
                   Share your product list and we’ll perform a quick feasibility and document gap-check, then propose the most efficient filing plan.
+                </p>
+
+                {/* ✅ Email (Closing CTA) */}
+                <p className="mt-3 text-sm">
+                  Prefer email?{" "}
+                  <a
+                    href="mailto:info@makenkorea.com"
+                    className="font-medium underline underline-offset-4 hover:no-underline"
+                  >
+                    info@makenkorea.com
+                  </a>
                 </p>
               </div>
             </div>
