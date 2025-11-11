@@ -6,7 +6,6 @@ import { createClient } from "@supabase/supabase-js";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Hourglass, ShieldAlert } from "lucide-react";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -24,7 +23,6 @@ type VendorInfo = {
   email?: string | null;
 };
 
-// RPC (RETURNS TABLE) → normalize to first row
 function coerceVendor(data: any): VendorInfo | null {
   const arr = Array.isArray(data) ? data : data ? [data] : [];
   const v = arr[0];
@@ -41,132 +39,100 @@ function coerceVendor(data: any): VendorInfo | null {
 }
 
 type Phase =
-  | "checking"
-  | "redirecting"
+  | "initial-checking"   // only before first decision
+  | "approved"           // sticky; never changes afterward
   | "no-vendor"
   | "pending"
   | "rejected"
   | "disabled"
-  | "approved"
   | "error";
 
-// ✅ Public vendor pages should never be gated
 const PUBLIC_VENDOR_PREFIXES = [
   "/vendor/login",
   "/vendor/register",
   "/vendor/forgot-password",
 ];
-
-// robust startsWith that also matches trailing slashes
 const isPublic = (pathname: string) =>
-  PUBLIC_VENDOR_PREFIXES.some(
-    (p) => pathname === p || pathname.startsWith(p + "/")
-  );
+  PUBLIC_VENDOR_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"));
 
-export default function VendorGate({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function VendorGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname() || "";
   const mounted = useRef(true);
 
-  // If we’re on a public vendor route, bypass everything immediately
-  if (isPublic(pathname)) {
-    return <>{children}</>;
-  }
+  // allow public pages to render without checks
+  if (isPublic(pathname)) return <>{children}</>;
 
-  const [phase, setPhase] = useState<Phase>("checking");
+  const [phase, setPhase] = useState<Phase>("initial-checking");
   const [vendor, setVendor] = useState<VendorInfo | null>(null);
+  const approvedOnce = useRef(false); // sticky flag
 
   const gotoLogin = () => {
-    // (Defensive) never redirect away from public pages
-    if (isPublic(pathname)) return;
-    setPhase("redirecting");
     router.replace(`/vendor/login?redirect=${encodeURIComponent(pathname)}`);
   };
 
-  const checkVendor = async () => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (!mounted.current) return;
-
-    if (!session?.user) {
-      gotoLogin();
-      return;
-    }
-
-    const { data, error } = await supabase.rpc("get_my_vendor");
-    if (!mounted.current) return;
-
-    if (error) {
-      console.error("get_my_vendor error", error);
-      setVendor(null);
-      setPhase("error");
-      return;
-    }
-
-    const v = coerceVendor(data);
-    setVendor(v);
-
-    if (!v) {
-      setPhase("no-vendor");
-      return;
-    }
-    if (v.status === "approved") {
-      setPhase("approved");
-      return;
-    }
-    if (v.status === "pending") {
-      setPhase("pending");
-      return;
-    }
-    if (v.status === "rejected") {
-      setPhase("rejected");
-      return;
-    }
-    setPhase("disabled");
-  };
-
+  // ---- ONE-TIME CHECK ONLY ----
   useEffect(() => {
     mounted.current = true;
 
-    // run only for protected pages (public are returned above)
-    checkVendor();
-
-    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+    (async () => {
+      // 1) session check
+      const { data: { session } } = await supabase.auth.getSession();
       if (!mounted.current) return;
 
-      if (event === "SIGNED_OUT") {
-        setVendor(null);
-        // after logout, protected pages go to login;
-        // public pages render immediately (but we never reach here on public)
+      if (!session?.user) {
+        // First hit, no session -> go login (only time we redirect automatically)
         gotoLogin();
         return;
       }
 
-      if (
-        event === "SIGNED_IN" ||
-        event === "INITIAL_SESSION" ||
-        event === "USER_UPDATED" ||
-        event === "TOKEN_REFRESHED"
-      ) {
-        setPhase("checking");
-        checkVendor();
+      // 2) vendor check
+      const { data, error } = await supabase.rpc("get_my_vendor");
+      if (!mounted.current) return;
+
+      if (error) {
+        setPhase("error");
+        return;
       }
+
+      const v = coerceVendor(data);
+      setVendor(v);
+
+      if (!v) { setPhase("no-vendor"); return; }
+
+      if (v.status === "approved") {
+        approvedOnce.current = true;
+        setPhase("approved"); // sticky forever
+        return;
+      }
+      if (v.status === "pending")  { setPhase("pending");  return; }
+      if (v.status === "rejected") { setPhase("rejected"); return; }
+      setPhase("disabled");
+    })();
+
+    // OPTIONAL: if you still want to react to explicit sign-out only
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      if (!mounted.current) return;
+      if (event === "SIGNED_OUT") {
+        // Comment these two lines if you truly want ZERO reactions after first check:
+        approvedOnce.current = false;
+        gotoLogin();
+      }
+      // For all other events, do nothing (no re-checks, no UI changes)
     });
 
     return () => {
       mounted.current = false;
-      sub.subscription.unsubscribe();
+      sub?.subscription?.unsubscribe?.();
     };
-    // re-run if protected path changes
-  }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+    // IMPORTANT: no deps → runs once, never re-checks
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ---------- Protected render states ----------
-  if (phase === "checking" || phase === "redirecting") {
+  // Once approved, ALWAYS render children; never block again
+  if (approvedOnce.current || phase === "approved") return <>{children}</>;
+
+  // Pre-approval render states (only during the first visit)
+  if (phase === "initial-checking") {
     return (
       <div className="container mx-auto py-16 text-muted-foreground">
         Loading vendor workspace…
@@ -178,16 +144,10 @@ export default function VendorGate({
     return (
       <div className="container mx-auto py-16">
         <Card className="max-w-xl mx-auto text-center">
-          <CardHeader>
-            <CardTitle className="text-2xl">Become a Vendor</CardTitle>
-          </CardHeader>
+          <CardHeader><CardTitle className="text-2xl">Become a Vendor</CardTitle></CardHeader>
           <CardContent className="space-y-4">
-            <p className="text-muted-foreground">
-              You don’t have a vendor account yet.
-            </p>
-            <Button asChild size="lg">
-              <Link href="/vendor/register">Create Vendor Account</Link>
-            </Button>
+            <p className="text-muted-foreground">You don’t have a vendor account yet.</p>
+            <Button asChild size="lg"><Link href="/vendor/register">Create Vendor Account</Link></Button>
           </CardContent>
         </Card>
       </div>
@@ -198,17 +158,10 @@ export default function VendorGate({
     return (
       <div className="container mx-auto py-16">
         <Card className="max-w-xl mx-auto text-center">
-          <CardHeader>
-            <Hourglass className="mx-auto h-10 w-10 text-amber-500" />
-            <CardTitle className="text-2xl mt-2">
-              Application in Review
-            </CardTitle>
-          </CardHeader>
+          <CardHeader><CardTitle className="text-2xl">Application in Review</CardTitle></CardHeader>
           <CardContent className="space-y-2">
             <p className="text-muted-foreground">
-              Thanks for applying
-              {vendor?.display_name ? `, ${vendor.display_name}` : ""}. We’ll
-              notify you once approved.
+              Thanks for applying{vendor?.display_name ? `, ${vendor.display_name}` : ""}. We’ll notify you once approved.
             </p>
           </CardContent>
         </Card>
@@ -220,25 +173,14 @@ export default function VendorGate({
     return (
       <div className="container mx-auto py-16">
         <Card className="max-w-xl mx-auto text-center">
-          <CardHeader>
-            <ShieldAlert className="mx-auto h-10 w-10 text-red-500" />
-            <CardTitle className="text-2xl mt-2">
-              {phase === "rejected"
-                ? "Application Rejected"
-                : "Account Disabled"}
-            </CardTitle>
-          </CardHeader>
+          <CardHeader><CardTitle className="text-2xl">
+            {phase === "rejected" ? "Application Rejected" : "Account Disabled"}
+          </CardTitle></CardHeader>
           <CardContent className="space-y-3">
-            {vendor?.rejected_reason ? (
-              <p className="text-sm text-muted-foreground">
-                Reason: {vendor.rejected_reason}
-              </p>
-            ) : (
-              <p className="text-muted-foreground">Please contact support.</p>
-            )}
-            <Button asChild variant="outline">
-              <Link href="/">Back to Home</Link>
-            </Button>
+            {vendor?.rejected_reason
+              ? <p className="text-sm text-muted-foreground">Reason: {vendor.rejected_reason}</p>
+              : <p className="text-muted-foreground">Please contact support.</p>}
+            <Button asChild variant="outline"><Link href="/">Back to Home</Link></Button>
           </CardContent>
         </Card>
       </div>
@@ -253,6 +195,5 @@ export default function VendorGate({
     );
   }
 
-  // ✅ Approved → render the vendor area
-  return <>{children}</>;
+  return null;
 }

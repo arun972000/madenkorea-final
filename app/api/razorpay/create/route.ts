@@ -1,80 +1,162 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { NextRequest, NextResponse } from "next/server";
+import Razorpay from "razorpay";
+import { createClient } from "@supabase/supabase-js";
 
 export async function POST(req: NextRequest) {
   try {
-    const { order_id } = await req.json();
+    const body = await req.json();
+    const { order_id, ui_total, attribution } = body || {};
 
     if (!order_id) {
-      return NextResponse.json({ error: 'order_id required' }, { status: 400 });
+      return NextResponse.json({ ok: false, error: "Missing order_id" }, { status: 400 });
     }
 
-    const supabaseAdmin = createClient(
+    const admin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY! // server-only secret
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // 1) Fetch order header (must exist & be pending)
-    const { data: order, error: ordErr } = await supabaseAdmin
-      .from('orders')
-      .select('id, order_number, total, currency, status')
-      .eq('id', order_id)
+    // 1) Load the app order
+    const { data: order, error: oErr } = await admin
+      .from("orders")
+      .select("id, user_id, subtotal, total, currency, status")
+      .eq("id", order_id)
       .maybeSingle();
 
-    if (ordErr || !order) {
-      return NextResponse.json({ error: 'Order not found' }, { status: 404 });
-    }
-    if (order.status !== 'pending_payment') {
-      return NextResponse.json({ error: `Order status is ${order.status}` }, { status: 400 });
-    }
-    if (!order.total || Number(order.total) <= 0) {
-      return NextResponse.json({ error: 'Invalid order total' }, { status: 400 });
+    if (oErr || !order) {
+      return NextResponse.json({ ok: false, error: "Order not found" }, { status: 404 });
     }
 
-    // 2) Create Razorpay order
-    const key_id = process.env.RAZORPAY_KEY_ID!;
-    const key_secret = process.env.RAZORPAY_KEY_SECRET!;
-    const auth = Buffer.from(`${key_id}:${key_secret}`).toString('base64');
+    if (!["created", "pending_payment"].includes(order.status)) {
+      return NextResponse.json(
+        { ok: false, error: `Order status ${order.status} not payable` },
+        { status: 400 }
+      );
+    }
 
-    const body = {
-      amount: Math.round(Number(order.total) * 100), // paise
-      currency: order.currency || 'INR',
-      receipt: order.order_number,
-      payment_capture: 1,
+    // 2) Determine amount to charge (prefer UI total)
+    const clientTotal = Number(ui_total);
+    const serverTotal = Number(order.total) || 0;
+
+    let amountToUse = serverTotal;
+    if (!isNaN(clientTotal) && clientTotal > 0) {
+      amountToUse = clientTotal;
+    }
+
+    const amountPaise = Math.round(amountToUse * 100);
+
+    // 3) Build notes and (if promo) resolve influencer + seed attribution
+    const notes: Record<string, any> = {
+      app_order_id: order.id,
     };
 
-    const res = await fetch('https://api.razorpay.com/v1/orders', {
-      method: 'POST',
-      headers: {
-        Authorization: `Basic ${auth}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
+    let promoCodeId: string | null = null;
+    let influencerId: string | null = null;
+    let discountPercent = 0;
+    let commissionPercent = 0;
 
-    const rzp = await res.json();
-    if (!res.ok) {
-      return NextResponse.json({ error: rzp }, { status: 400 });
+    if (attribution?.type === "promo" && attribution?.code) {
+      // Look up promo by CODE (and optionally scope/product)
+      const { data: promo, error: promoErr } = await admin
+        .from("promo_codes")
+        .select("id, influencer_id, discount_percent, commission_percent, active, starts_at, expires_at")
+        .eq("code", attribution.code)
+        .eq("active", true)
+        .maybeSingle();
+
+      if (promoErr) {
+        console.warn("[RZP:create] promo lookup error:", promoErr.message);
+      }
+
+      if (promo) {
+        // (Optional) time window check
+        const now = new Date();
+        const inWindow =
+          (!promo.starts_at || new Date(promo.starts_at) <= now) &&
+          (!promo.expires_at || new Date(promo.expires_at) >= now);
+
+        if (inWindow) {
+          promoCodeId = promo.id;
+          influencerId = promo.influencer_id;
+          discountPercent = Number(promo.discount_percent || 0);
+          commissionPercent = Number(promo.commission_percent || 0);
+
+          // 3a) Seed order_attributions row NOW (old behavior)
+          await admin
+            .from("order_attributions")
+            .upsert(
+              {
+                order_id: order.id,
+                influencer_id: influencerId,
+                promo_code_id: promoCodeId,
+                attributed_by: "promo",
+                discount_percent: discountPercent,
+                commission_percent: commissionPercent,
+                commission_amount: 0,
+                currency: order.currency || "INR",
+                status: "pending",
+              },
+              { onConflict: "order_id" }
+            );
+
+          // 3b) Also attach promo to the order (so verify can rebuild if needed)
+          await admin
+            .from("orders")
+            .update({
+              promo_code_id: promoCodeId,
+              promo_snapshot: {
+                id: promo.id,
+                code: attribution.code,
+                discount_percent: discountPercent,
+                commission_percent: commissionPercent,
+                influencer_id: influencerId,
+              },
+            })
+            .eq("id", order.id);
+
+          // 3c) Put attribution into Razorpay notes (this is where your influencer_id was null before)
+          notes.type = "promo";
+          notes.code = attribution.code;
+          notes.promo_code_id = promoCodeId;
+          notes.influencer_id = influencerId;
+          notes.discount_percent = discountPercent;
+          notes.commission_percent = commissionPercent;
+        }
+      }
     }
 
-    // 3) Persist payment_order
-    await supabaseAdmin.from('payment_orders').insert({
-      order_id: order.id,
-      provider: 'razorpay',
-      provider_order_id: rzp.id,        // "order_xxx"
-      amount: order.total,
-      currency: order.currency || 'INR',
-      status: rzp.status || 'created',
-      receipt: order.order_number,
+    // 4) Init Razorpay client
+    const razorpay = new Razorpay({
+      key_id: process.env.RAZORPAY_KEY_ID!,
+      key_secret: process.env.RAZORPAY_KEY_SECRET!,
     });
 
-    // 4) Return public key + Razorpay order to client
-    return NextResponse.json({
-      key: key_id,
+    // 5) Create RZP order
+    const rzpOrder = await razorpay.orders.create({
+      amount: amountPaise,
+      currency: order.currency || "INR",
+      receipt: order.id,
+      notes,
+    });
+
+    // 6) Persist payment_orders mapping (best effort)
+    await admin.from("payment_orders").insert({
       order_id: order.id,
-      razorpay_order: rzp,               // includes id, amount, currency, status
+      provider: "razorpay",
+      provider_order_id: rzpOrder.id,
+      amount: amountToUse,
+      currency: order.currency || "INR",
+      status: "created",
+      receipt: rzpOrder.receipt || order.id,
+    });
+
+    return NextResponse.json({
+      ok: true,
+      key: process.env.RAZORPAY_KEY_ID,
+      razorpay_order: rzpOrder,
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 });
+    console.error("[RZP:create] error", e);
+    return NextResponse.json({ ok: false, error: e?.message || "Failed" }, { status: 500 });
   }
 }

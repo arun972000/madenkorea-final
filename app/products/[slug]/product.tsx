@@ -36,6 +36,7 @@ import {
   Mail,
   MessageCircle,
   Send,
+ PlayCircle
 } from "lucide-react";
 import { CustomerLayout } from "@/components/CustomerLayout";
 import { Button } from "@/components/ui/button";
@@ -80,6 +81,7 @@ type Product = {
   new_until?: string | null;
   is_featured?: boolean | null;
   is_trending?: boolean | null;
+  video_path?: string | null;
 
   // highlight flags
   made_in_korea?: boolean | null;
@@ -321,6 +323,7 @@ export default function ProductPage() {
           volume_ml, net_weight_g, country_of_origin, new_until, is_featured, is_trending,
           made_in_korea, is_vegetarian, cruelty_free, toxin_free, paraben_free,
           ingredients_md, key_features_md, additional_details_md, key_benefits,
+          video_path,
           brands ( name, slug )
         `
         )
@@ -408,7 +411,16 @@ export default function ProductPage() {
       ? [storagePublicUrl(product.hero_image_path) || ""]
       : [];
     return gallery.filter(Boolean);
+    
   }, [images, product?.hero_image_path]);
+
+  const videoUrl = useMemo(
+  () => storagePublicUrl(product?.video_path ?? null),
+  [product?.video_path]
+);
+
+const galleryCount = imageUrls.length + (videoUrl ? 1 : 0);
+const isVideoSelected = selectedImage === imageUrls.length && !!videoUrl;
 
   const inWishlist = product ? isInWishlist(product.id) : false;
 
@@ -873,57 +885,87 @@ export default function ProductPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 lg:gap-12">
               {/* GALLERY */}
               <div>
-                <div className="relative aspect-square mb-4 bg-muted rounded-lg overflow-hidden group">
-                  {imageUrls[selectedImage] ? (
-                    <Image
-                      src={imageUrls[selectedImage]}
-                      alt={images[selectedImage]?.alt || product.name}
-                      fill
-                      className="object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full bg-muted" />
-                  )}
-                  {discount > 0 && (
-                    <Badge
-                      className="absolute top-4 left-4"
-                      variant="destructive"
-                    >
-                      {discount}% OFF
-                    </Badge>
-                  )}
-                  <Button
-                    variant="secondary"
-                    size="icon"
-                    className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity"
-                    onClick={() => setShowZoom(true)}
-                  >
-                    <ZoomIn className="h-5 w-5" />
-                  </Button>
-                </div>
+               <div className="relative aspect-square mb-4 bg-muted rounded-lg overflow-hidden group">
+  {isVideoSelected && videoUrl ? (
+    <video
+      key={videoUrl} /* force refresh when switching */
+      src={videoUrl}
+      controls
+      autoPlay
+      playsInline
+      className="w-full h-full object-cover" /* fills without side black bars */
+    />
+  ) : imageUrls[selectedImage] ? (
+    <Image
+      src={imageUrls[selectedImage]}
+      alt={images[selectedImage]?.alt || product.name}
+      fill
+      className="object-cover"
+    />
+  ) : (
+    <div className="w-full h-full bg-muted" />
+  )}
 
-                {imageUrls.length > 1 && (
-                  <div className="grid grid-cols-4 gap-2">
-                    {imageUrls.map((src, idx) => (
-                      <button
-                        key={idx}
-                        onClick={() => setSelectedImage(idx)}
-                        className={`relative aspect-square rounded-lg overflow-hidden border-2 ${
-                          selectedImage === idx
-                            ? "border-primary"
-                            : "border-transparent"
-                        }`}
-                      >
-                        <Image
-                          src={src}
-                          alt={`${product.name} ${idx + 1}`}
-                          fill
-                          className="object-cover"
-                        />
-                      </button>
-                    ))}
-                  </div>
-                )}
+  {discount > 0 && (
+    <Badge className="absolute top-4 left-4" variant="destructive">
+      {discount}% OFF
+    </Badge>
+  )}
+
+  {/* Hide zoom on video; keep it for images */}
+  {!isVideoSelected && (
+    <Button
+      variant="secondary"
+      size="icon"
+      className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity"
+      onClick={() => setShowZoom(true)}
+    >
+      <ZoomIn className="h-5 w-5" />
+    </Button>
+  )}
+</div>
+
+
+               {galleryCount > 1 && (
+  <div className="grid grid-cols-4 gap-2">
+    {/* image thumbs */}
+    {imageUrls.map((src, idx) => (
+      <button
+        key={idx}
+        onClick={() => setSelectedImage(idx)}
+        className={`relative aspect-square rounded-lg overflow-hidden border-2 ${
+          selectedImage === idx ? "border-primary" : "border-transparent"
+        }`}
+      >
+        <Image src={src} alt={`${product.name} ${idx + 1}`} fill className="object-cover" />
+      </button>
+    ))}
+
+    {/* video thumb (last) */}
+    {videoUrl && (
+      <button
+        onClick={() => setSelectedImage(imageUrls.length)}
+        className={`relative aspect-square rounded-lg overflow-hidden border-2 ${
+          isVideoSelected ? "border-primary" : "border-transparent"
+        }`}
+        aria-label="Product video"
+        title="Product video"
+      >
+        <video
+          src={videoUrl}
+          muted
+          playsInline
+          preload="metadata"
+          className="absolute inset-0 w-full h-full object-cover"
+        />
+        <div className="absolute inset-0 bg-black/30 grid place-items-center">
+          <PlayCircle className="h-8 w-8 text-white drop-shadow" />
+        </div>
+      </button>
+    )}
+  </div>
+)}
+
               </div>
 
               {/* DETAILS */}

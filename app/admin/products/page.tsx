@@ -1,8 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAuth } from '@/lib/contexts/AuthContext';
+import { createClient } from '@supabase/supabase-js';
+import { toast } from 'sonner';
+
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -10,81 +12,226 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Search, Plus, Edit, Trash2, LogOut, Filter, Eye, EyeOff } from 'lucide-react';
-import { toast } from 'sonner';
-import { mockProducts, mockBrands, mockCategories } from '@/lib/mock-data';
+import { Search, Filter, Edit, Trash2, Save, Eye, EyeOff, LogOut } from 'lucide-react';
+
+// If you already have a Supabase client wrapper, replace this with your import.
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  { auth: { persistSession: true, autoRefreshToken: true } }
+);
+
+type ProductRow = {
+  id: string;
+  slug: string;
+  name: string;
+  sku: string | null;
+  price: number | null;
+  currency: string | null;
+  is_published: boolean;
+  stock_qty: number;
+  brand_id: string | null;
+  category_id: string | null;
+  vendor_id: string | null;
+  is_featured: boolean;
+  featured_rank: number | null;
+  is_trending: boolean;
+  new_until: string | null; // ISO or null
+};
+
+type BrandRow = { id: string; name: string | null; slug: string | null };
+type CategoryRow = { id: string; name: string | null; slug: string | null };
+type VendorRow = { id: string; display_name: string | null; name?: string | null };
+
+type AdminDraft = {
+  is_featured: boolean;
+  featured_rank: number | '' | null;
+  is_trending: boolean;
+  new_until: string; // yyyy-mm-dd (for <input type="date">)
+};
+
+function toDateInputValue(ts?: string | null) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return '';
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
 
 export default function AdminProductsPage() {
   const router = useRouter();
-  const { user, hasRole, logout } = useAuth();
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState<Record<string, boolean>>({});
+  const [deleting, setDeleting] = useState<Record<string, boolean>>({});
+
+  const [products, setProducts] = useState<ProductRow[]>([]);
+  const [brands, setBrands] = useState<BrandRow[]>([]);
+  const [categories, setCategories] = useState<CategoryRow[]>([]);
+  const [vendors, setVendors] = useState<VendorRow[]>([]);
+
+  const [adminDrafts, setAdminDrafts] = useState<Record<string, AdminDraft>>({});
+
+  // filters
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
   const [filterBrand, setFilterBrand] = useState('all');
   const [filterCategory, setFilterCategory] = useState('all');
-  const [filterStatus, setFilterStatus] = useState('all');
+  const [filterPublish, setFilterPublish] = useState<'all' | 'published' | 'unpublished'>('all');
   const [showFilters, setShowFilters] = useState(false);
 
-  if (!hasRole('admin')) {
-    router.push('/admin');
-    return null;
-  }
+  const [selected, setSelected] = useState<string[]>([]);
 
-  const handleLogout = async () => {
-    await logout();
-    toast.success('Logged out successfully');
-    router.push('/');
-  };
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        // Optional: ensure current user is admin (adapt to your setup)
+        // const { data: isAdmin } = await supabase.rpc('is_admin');
+        // if (!isAdmin) { router.replace('/admin'); return; }
 
-  const filteredProducts = mockProducts.filter(product => {
-    const matchesSearch =
-      product.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      product.brand_name?.toLowerCase().includes(searchQuery.toLowerCase());
+        const [{ data: prod, error: pErr }, { data: br, error: bErr }, { data: cat, error: cErr }, { data: ven, error: vErr }] =
+          await Promise.all([
+            supabase
+              .from('products')
+              .select('id,slug,name,sku,price,currency,is_published,stock_qty,brand_id,category_id,vendor_id,is_featured,featured_rank,is_trending,new_until')
+              .order('created_at', { ascending: false }),
+            supabase.from('brands').select('id,name,slug').order('name', { ascending: true }),
+            supabase.from('categories').select('id,name,slug').order('name', { ascending: true }),
+            supabase.from('vendors').select('id,display_name').order('display_name', { ascending: true }),
+          ]);
 
-    const matchesBrand = filterBrand === 'all' || product.brand_id === filterBrand;
-    const matchesCategory =
-      filterCategory === 'all' || product.category_ids.includes(filterCategory);
-    const matchesStatus = filterStatus === 'all' || product.status === filterStatus;
+        if (pErr) throw pErr;
+        if (bErr) throw bErr;
+        if (cErr) throw cErr;
+        if (vErr) throw vErr;
 
-    return matchesSearch && matchesBrand && matchesCategory && matchesStatus;
-  });
+        setProducts((prod ?? []) as ProductRow[]);
+        setBrands((br ?? []) as BrandRow[]);
+        setCategories((cat ?? []) as CategoryRow[]);
+        setVendors((ven ?? []) as VendorRow[]);
 
-  const toggleProductSelection = (productId: string) => {
-    setSelectedProducts(prev =>
-      prev.includes(productId)
-        ? prev.filter(id => id !== productId)
-        : [...prev, productId]
-    );
+        // seed drafts
+        const drafts: Record<string, AdminDraft> = {};
+        for (const p of (prod ?? []) as ProductRow[]) {
+          drafts[p.id] = {
+            is_featured: !!p.is_featured,
+            featured_rank: p.featured_rank ?? '',
+            is_trending: !!p.is_trending,
+            new_until: toDateInputValue(p.new_until),
+          };
+        }
+        setAdminDrafts(drafts);
+      } catch (e: any) {
+        toast.error(e?.message || 'Failed to load products');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [router]);
+
+  const brandMap = useMemo(() => Object.fromEntries(brands.map(b => [b.id, b.name || b.slug || b.id])), [brands]);
+  const categoryMap = useMemo(() => Object.fromEntries(categories.map(c => [c.id, c.name || c.slug || c.id])), [categories]);
+  const vendorMap = useMemo(() => Object.fromEntries(vendors.map(v => [v.id, v.display_name || v.name || v.id])), [vendors]);
+
+  const filtered = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return products.filter(p => {
+      const matchesQ =
+        !q ||
+        p.name.toLowerCase().includes(q) ||
+        (p.sku || '').toLowerCase().includes(q) ||
+        (brandMap[p.brand_id || ''] || '').toLowerCase().includes(q) ||
+        (vendorMap[p.vendor_id || ''] || '').toLowerCase().includes(q);
+
+      const matchesBrand = filterBrand === 'all' || p.brand_id === filterBrand;
+      const matchesCat = filterCategory === 'all' || p.category_id === filterCategory;
+      const matchesPub =
+        filterPublish === 'all' ||
+        (filterPublish === 'published' ? p.is_published : !p.is_published);
+
+      return matchesQ && matchesBrand && matchesCat && matchesPub;
+    });
+  }, [products, searchQuery, filterBrand, filterCategory, filterPublish, brandMap, vendorMap]);
+
+  const toggleSelect = (id: string) => {
+    setSelected(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
   };
 
   const toggleSelectAll = () => {
-    if (selectedProducts.length === filteredProducts.length) {
-      setSelectedProducts([]);
-    } else {
-      setSelectedProducts(filteredProducts.map(p => p.id));
+    if (selected.length === filtered.length) setSelected([]);
+    else setSelected(filtered.map(p => p.id));
+  };
+
+  const saveAdminFields = async (id: string) => {
+    const draft = adminDrafts[id];
+    if (!draft) return;
+
+    if (draft.featured_rank !== '' && draft.featured_rank != null) {
+      const n = Number(draft.featured_rank);
+      if (!Number.isFinite(n) || n < 0) {
+        toast.error('Featured rank must be a non-negative number');
+        return;
+      }
+    }
+
+    const payload: Partial<ProductRow> = {
+      is_featured: !!draft.is_featured,
+      featured_rank:
+        draft.featured_rank === '' || draft.featured_rank == null ? null : Number(draft.featured_rank),
+      is_trending: !!draft.is_trending,
+      new_until: draft.new_until ? new Date(`${draft.new_until}T00:00:00Z`).toISOString() : null,
+    };
+
+    try {
+      setSaving(s => ({ ...s, [id]: true }));
+      const { error } = await supabase.from('products').update(payload).eq('id', id);
+      if (error) throw error;
+
+      setProducts(prev =>
+        prev.map(p => (p.id === id ? { ...p, ...payload } as ProductRow : p))
+      );
+      toast.success('Saved');
+    } catch (e: any) {
+      toast.error(e?.message || 'Save failed');
+    } finally {
+      setSaving(s => ({ ...s, [id]: false }));
     }
   };
 
-  const handleBulkAction = (action: string) => {
-    if (selectedProducts.length === 0) {
-      toast.error('Please select products first');
-      return;
+  const deleteProduct = async (id: string) => {
+    if (!confirm('Delete this product? This cannot be undone.')) return;
+    try {
+      setDeleting(s => ({ ...s, [id]: true }));
+      const { error } = await supabase.from('products').delete().eq('id', id);
+      if (error) throw error;
+      setProducts(prev => prev.filter(p => p.id !== id));
+      setSelected(prev => prev.filter(x => x !== id));
+      toast.success('Deleted');
+    } catch (e: any) {
+      toast.error(e?.message || 'Delete failed');
+    } finally {
+      setDeleting(s => ({ ...s, [id]: false }));
     }
+  };
 
-    switch (action) {
-      case 'activate':
-        toast.success(`${selectedProducts.length} product(s) activated`);
-        break;
-      case 'hide':
-        toast.success(`${selectedProducts.length} product(s) hidden`);
-        break;
-      case 'delete':
-        toast.success(`${selectedProducts.length} product(s) deleted`);
-        break;
-      default:
-        toast.info('Action coming soon');
+  const bulkPublish = async (publish: boolean) => {
+    if (selected.length === 0) return toast.error('Select products first');
+    try {
+      const { error } = await supabase.from('products').update({ is_published: publish }).in('id', selected);
+      if (error) throw error;
+      setProducts(prev => prev.map(p => (selected.includes(p.id) ? { ...p, is_published: publish } : p)));
+      toast.success(publish ? 'Published' : 'Hidden');
+      setSelected([]);
+    } catch (e: any) {
+      toast.error(e?.message || 'Bulk update failed');
     }
+  };
 
-    setSelectedProducts([]);
+  const onLogout = async () => {
+    await supabase.auth.signOut();
+    router.push('/');
   };
 
   return (
@@ -92,205 +239,246 @@ export default function AdminProductsPage() {
       <header className="border-b bg-background">
         <div className="container mx-auto py-4 flex justify-between items-center">
           <div className="flex items-center gap-4">
-            <Button variant="ghost" onClick={() => router.push('/admin')}>
-              ← Back
-            </Button>
+            <Button variant="ghost" onClick={() => router.push('/admin')}>← Back</Button>
             <h1 className="text-2xl font-bold">Products Management</h1>
           </div>
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-muted-foreground">{user?.name}</span>
-            <Button variant="outline" size="sm" onClick={handleLogout}>
-              <LogOut className="mr-2 h-4 w-4" />
-              Logout
-            </Button>
-          </div>
+          <Button variant="outline" size="sm" onClick={onLogout}>
+            <LogOut className="mr-2 h-4 w-4" /> Logout
+          </Button>
         </div>
       </header>
 
       <div className="container mx-auto py-8">
         <Card>
           <CardHeader>
-            <div className="flex justify-between items-center">
+            <div className="flex items-center justify-between">
               <div>
-                <CardTitle>Product Catalog</CardTitle>
-                <CardDescription>Manage your product inventory and listings</CardDescription>
+                <CardTitle>Catalog</CardTitle>
+                <CardDescription>Admins can edit Featured / Rank / Trending / New Arrival and delete any product.</CardDescription>
               </div>
-              <Button onClick={() => router.push('/admin/products/new')}>
-                <Plus className="mr-2 h-4 w-4" />
-                Add Product
-              </Button>
+              {/* Admin cannot create new products → no Add button */}
             </div>
           </CardHeader>
+
           <CardContent>
             <div className="mb-6 space-y-4">
               <div className="flex gap-4">
                 <div className="flex-1 relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
-                    placeholder="Search products by name or brand..."
+                    placeholder="Search name, brand, vendor, or SKU…"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="pl-10"
                   />
                 </div>
-                <Button
-                  variant="outline"
-                  onClick={() => setShowFilters(!showFilters)}
-                >
-                  <Filter className="mr-2 h-4 w-4" />
-                  Filters
+                <Button variant="outline" onClick={() => setShowFilters(v => !v)}>
+                  <Filter className="mr-2 h-4 w-4" /> Filters
                 </Button>
               </div>
 
               {showFilters && (
-                <div className="grid grid-cols-3 gap-4 p-4 border rounded-lg bg-muted/50">
+                <div className="grid md:grid-cols-3 gap-4 p-4 border rounded-lg bg-muted/50">
                   <div>
                     <label className="text-sm font-medium mb-2 block">Brand</label>
                     <Select value={filterBrand} onValueChange={setFilterBrand}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
+                      <SelectTrigger><SelectValue placeholder="All brands" /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="all">All Brands</SelectItem>
-                        {mockBrands.map(brand => (
-                          <SelectItem key={brand.id} value={brand.id}>
-                            {brand.name}
-                          </SelectItem>
+                        <SelectItem value="all">All brands</SelectItem>
+                        {brands.map(b => (
+                          <SelectItem key={b.id} value={b.id}>{b.name || b.slug || b.id}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
-
                   <div>
                     <label className="text-sm font-medium mb-2 block">Category</label>
                     <Select value={filterCategory} onValueChange={setFilterCategory}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
+                      <SelectTrigger><SelectValue placeholder="All categories" /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="all">All Categories</SelectItem>
-                        {mockCategories.map(cat => (
-                          <SelectItem key={cat.id} value={cat.id}>
-                            {cat.name}
-                          </SelectItem>
+                        <SelectItem value="all">All categories</SelectItem>
+                        {categories.map(c => (
+                          <SelectItem key={c.id} value={c.id}>{c.name || c.slug || c.id}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
-
                   <div>
-                    <label className="text-sm font-medium mb-2 block">Status</label>
-                    <Select value={filterStatus} onValueChange={setFilterStatus}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
+                    <label className="text-sm font-medium mb-2 block">Publish</label>
+                    <Select value={filterPublish} onValueChange={(v: any) => setFilterPublish(v)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="all">All Status</SelectItem>
-                        <SelectItem value="active">Active</SelectItem>
-                        <SelectItem value="draft">Draft</SelectItem>
-                        <SelectItem value="hidden">Hidden</SelectItem>
+                        <SelectItem value="all">All</SelectItem>
+                        <SelectItem value="published">Published</SelectItem>
+                        <SelectItem value="unpublished">Unpublished</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
               )}
 
-              {selectedProducts.length > 0 && (
+              {selected.length > 0 && (
                 <div className="flex items-center gap-2 p-3 bg-primary/10 rounded-lg">
-                  <span className="text-sm font-medium">
-                    {selectedProducts.length} product(s) selected
-                  </span>
-                  <div className="flex gap-2 ml-auto">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleBulkAction('activate')}
-                    >
-                      <Eye className="h-4 w-4 mr-1" />
-                      Activate
+                  <span className="text-sm font-medium">{selected.length} selected</span>
+                  <div className="ml-auto flex gap-2">
+                    <Button size="sm" variant="outline" onClick={() => bulkPublish(true)}>
+                      <Eye className="h-4 w-4 mr-1" /> Publish
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleBulkAction('hide')}
-                    >
-                      <EyeOff className="h-4 w-4 mr-1" />
-                      Hide
+                    <Button size="sm" variant="outline" onClick={() => bulkPublish(false)}>
+                      <EyeOff className="h-4 w-4 mr-1" /> Hide
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      onClick={() => handleBulkAction('delete')}
-                    >
-                      <Trash2 className="h-4 w-4 mr-1" />
-                      Delete
-                    </Button>
+                    {/* You can add bulk delete if desired */}
                   </div>
                 </div>
               )}
             </div>
 
-            <div className="rounded-md border">
+            <div className="rounded-md border overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-12">
                       <Checkbox
-                        checked={selectedProducts.length === filteredProducts.length && filteredProducts.length > 0}
+                        checked={selected.length === filtered.length && filtered.length > 0}
                         onCheckedChange={toggleSelectAll}
                       />
                     </TableHead>
                     <TableHead>Product</TableHead>
+                    <TableHead>Vendor</TableHead>
                     <TableHead>Brand</TableHead>
                     <TableHead>Price</TableHead>
                     <TableHead>Stock</TableHead>
-                    <TableHead>Status</TableHead>
+                    <TableHead>Published</TableHead>
+                    <TableHead>Featured</TableHead>
+                    <TableHead>Feat. Rank</TableHead>
+                    <TableHead>Trending</TableHead>
+                    <TableHead>New Until</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
+
                 <TableBody>
-                  {filteredProducts.map((product) => (
-                    <TableRow key={product.id}>
-                      <TableCell>
-                        <Checkbox
-                          checked={selectedProducts.includes(product.id)}
-                          onCheckedChange={() => toggleProductSelection(product.id)}
-                        />
-                      </TableCell>
-                      <TableCell className="font-medium">{product.title}</TableCell>
-                      <TableCell>{product.brand_name || 'N/A'}</TableCell>
-                      <TableCell>₹{product.price.toLocaleString('en-IN')}</TableCell>
-                      <TableCell>{product.inventory.qty}</TableCell>
-                      <TableCell>
-                        <Badge variant={product.status === 'active' ? 'default' : 'secondary'}>
-                          {product.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button variant="ghost" size="icon" onClick={() => router.push(`/admin/products/${product.id}`)}>
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => {
-                            if (confirm('Are you sure you want to delete this product?')) {
-                              toast.success('Product deleted successfully');
-                            }
-                          }}>
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {loading ? (
+                    <TableRow><TableCell colSpan={12} className="text-center py-8">Loading…</TableCell></TableRow>
+                  ) : filtered.length === 0 ? (
+                    <TableRow><TableCell colSpan={12} className="text-center py-8 text-muted-foreground">No products found</TableCell></TableRow>
+                  ) : (
+                    filtered.map(p => {
+                      const draft = adminDrafts[p.id] ?? {
+                        is_featured: !!p.is_featured,
+                        featured_rank: p.featured_rank ?? '',
+                        is_trending: !!p.is_trending,
+                        new_until: toDateInputValue(p.new_until),
+                      };
+                      return (
+                        <TableRow key={p.id}>
+                          <TableCell>
+                            <Checkbox
+                              checked={selected.includes(p.id)}
+                              onCheckedChange={() => toggleSelect(p.id)}
+                            />
+                          </TableCell>
+
+                          <TableCell className="font-medium">
+                            <div className="flex flex-col">
+                              <span>{p.name}</span>
+                              <span className="text-xs text-muted-foreground">SKU: {p.sku || '—'}</span>
+                            </div>
+                          </TableCell>
+
+                          <TableCell>{vendorMap[p.vendor_id || ''] || '—'}</TableCell>
+                          <TableCell>{brandMap[p.brand_id || ''] || '—'}</TableCell>
+                          <TableCell>₹{Number(p.price || 0).toLocaleString('en-IN')}</TableCell>
+                          <TableCell>{p.stock_qty ?? 0}</TableCell>
+
+                          <TableCell>
+                            <Badge variant={p.is_published ? 'default' : 'secondary'}>
+                              {p.is_published ? 'Published' : 'Hidden'}
+                            </Badge>
+                          </TableCell>
+
+                          {/* Admin inline controls */}
+                          <TableCell>
+                            <Checkbox
+                              checked={!!draft.is_featured}
+                              onCheckedChange={(v) =>
+                                setAdminDrafts(s => ({ ...s, [p.id]: { ...draft, is_featured: !!v } }))
+                              }
+                            />
+                          </TableCell>
+
+                          <TableCell className="max-w-[120px]">
+                            <Input
+                              inputMode="numeric"
+                              type="number"
+                              min={0}
+                              placeholder="rank"
+                              value={draft.featured_rank as any}
+                              onChange={(e) =>
+                                setAdminDrafts(s => ({
+                                  ...s,
+                                  [p.id]: { ...draft, featured_rank: e.target.value === '' ? '' : Number(e.target.value) },
+                                }))
+                              }
+                            />
+                          </TableCell>
+
+                          <TableCell>
+                            <Checkbox
+                              checked={!!draft.is_trending}
+                              onCheckedChange={(v) =>
+                                setAdminDrafts(s => ({ ...s, [p.id]: { ...draft, is_trending: !!v } }))
+                              }
+                            />
+                          </TableCell>
+
+                          <TableCell className="max-w-[160px]">
+                            <Input
+                              type="date"
+                              value={draft.new_until}
+                              onChange={(e) =>
+                                setAdminDrafts(s => ({ ...s, [p.id]: { ...draft, new_until: e.target.value } }))
+                              }
+                            />
+                          </TableCell>
+
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-2">
+                              {/* Optional: open a read-only detail page if you have one */}
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => router.push(`/admin/products/${p.id}`)}
+                                title="View details"
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => saveAdminFields(p.id)}
+                                disabled={!!saving[p.id]}
+                                title="Save admin fields"
+                              >
+                                <Save className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => deleteProduct(p.id)}
+                                disabled={!!deleting[p.id]}
+                              >
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
                 </TableBody>
               </Table>
             </div>
-
-            {filteredProducts.length === 0 && (
-              <div className="text-center py-12">
-                <p className="text-muted-foreground">No products found matching your search.</p>
-              </div>
-            )}
           </CardContent>
         </Card>
       </div>

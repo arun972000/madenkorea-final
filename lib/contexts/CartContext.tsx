@@ -34,6 +34,7 @@ type CartContextType = {
   removeItem: (itemId: string) => Promise<void>;
   refresh: () => Promise<void>;
   clearGuest: () => void;
+  clear: () => Promise<void>;                // <-- NEW (unified clear)
 };
 
 const CartContext = createContext<CartContextType>({} as any);
@@ -177,6 +178,23 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     setItems([]);
   };
 
+  // NEW: unified clear for guests + authed users
+  const clear = async () => {
+    try {
+      if (!isAuthenticated) {
+        clearGuest();
+        setTotals(null);
+        return;
+      }
+      // tolerate absence if your order RPC already empties server cart
+      await supabase.rpc("cart_clear");
+      setItems([]);
+      setTotals(null);
+    } catch (e) {
+      console.error("cart.clear error", e);
+    }
+  };
+
   const value = useMemo(
     () => ({
       ready,
@@ -189,6 +207,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       removeItem,
       refresh,
       clearGuest,
+      clear,                 // expose
     }),
     [ready, loading, cartId, totals, items]
   );

@@ -293,9 +293,13 @@ export default function VendorProductsPage() {
               <RefreshCcw className="h-4 w-4 mr-2" />
               Refresh
             </Button>
+            <Button onClick={() => router.push("/vendor/products/single-new")}>
+              <Plus className="mr-2 h-4 w-4" />
+              Add Single Product
+            </Button>
             <Button onClick={() => router.push("/vendor/products/new")}>
               <Plus className="mr-2 h-4 w-4" />
-              Add Product
+              Add Bulk Product
             </Button>
           </div>
         </div>

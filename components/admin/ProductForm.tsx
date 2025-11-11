@@ -1,1302 +1,1177 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Image from "next/image";
+import React, { useMemo, useState } from "react";
+import * as XLSX from "xlsx";
 import { createClient } from "@supabase/supabase-js";
 
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
-import { toast } from "sonner";
+/* ──────────────────────────────────────────────────────────────
+   Supabase client (browser) — no auth logic here
+   ────────────────────────────────────────────────────────────── */
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  { auth: { persistSession: true, autoRefreshToken: true } }
+);
 
-import ExcelJS from "exceljs";
-import * as XLSX from "xlsx";
-import {
-  Download,
-  FileSpreadsheet,
-  Image as ImageIcon,
-  Upload,
-  AlertTriangle,
-  CheckCircle2,
-} from "lucide-react";
-
-/* -------------------------------------------------------------------------------------------------
- * Supabase (browser client)
- * -------------------------------------------------------------------------------------------------*/
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-  throw new Error(
-    "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY"
-  );
-}
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  auth: { persistSession: true, autoRefreshToken: true },
-});
-
-/* -------------------------------------------------------------------------------------------------
- * Types
- * -------------------------------------------------------------------------------------------------*/
-type ProductFormProps = {
-  onSave?: (product: any) => void; // not used on bulk-only screen; kept for signature compatibility
-  onCancel?: () => void; // not used
-};
+/* ──────────────────────────────────────────────────────────────
+   Types
+   ────────────────────────────────────────────────────────────── */
 
 type BulkProductRow = {
-  // core
-  sku: string;
+  sku: string | null;
   slug: string;
   name: string;
-  short_description?: string;
-  description?: string;
-  brand_slug: string;
-  price?: number | null;
-  currency?: string | null;
-  country_of_origin?: string | null;
-  volume_ml?: number | null;
-  net_weight_g?: number | null;
-  category_slug: string;
+  brand_slug: string | null;
+  category_slug: string | null;
+  price: number | null;
+  currency: string | null;
+  short_description: string | null;
+  description: string | null;
+
+  // images come from image1..image5 columns
+  hero_image_filename: null;
+  og_image_filename: null;
+
+  // vendor-controlled
   is_published: boolean;
-  hero_image_filename?: string | null;
-  attributes_json?: string | null;
-
-  // rich text (Markdown)
-  ingredients_md?: string | null;
-  key_features_md?: string | null;
-  additional_details_md?: string | null;
-
-  // JSON-ish
-  faq?: Array<{ q: string; a: string }>;
-  key_benefits?: string[];
+  compare_at_price: number | null;
+  sale_price: number | null;
+  sale_starts_at: string | null;
+  sale_ends_at: string | null;
 
   // badges
-  made_in_korea?: boolean;
-  is_vegetarian?: boolean;
-  cruelty_free?: boolean;
-  toxin_free?: boolean;
-  paraben_free?: boolean;
+  made_in_korea: boolean;
+  is_vegetarian: boolean;
+  cruelty_free: boolean;
+  toxin_free: boolean;
+  paraben_free: boolean;
 
-  // pricing / merch / SEO
-  compare_at_price?: number | null;
-  sale_price?: number | null;
-  sale_starts_at?: string | Date | number | null;
-  sale_ends_at?: string | Date | number | null;
-  is_featured?: string | boolean | null;
-  featured_rank?: number | null;
-  is_trending?: string | boolean | null;
-  new_until?: string | Date | number | null;
-  meta_title?: string | null;
-  meta_description?: string | null;
-  og_image_filename?: string | null;
+  // SEO / rich
+  meta_title: string | null;
+  meta_description: string | null;
+  ingredients_md: string | null;
+  key_features_md: string | null;
+  additional_details_md: string | null;
+  attributes_json: string | null;
+  faq: Array<{ q: string; a: string }>;
+  key_benefits: string[];
+
+  // misc
+  volume_ml: number | null;
+  net_weight_g: number | null;
+  country_of_origin: string | null;
 };
 
 type BulkMediaRow = {
-  sku: string;
+  sku: string | null;
   filename: string;
-  alt?: string | null;
-  sort_order?: number | null;
+  alt: string | null;
+  sort_order: number | null;
 };
 
-type MyVendor = {
-  id: string;
-  status: "pending" | "approved" | "rejected" | "disabled";
+type BulkVideoRow = {
+  sku: string | null;
+  filename: string;
+  alt: string | null;
 };
 
-/* -------------------------------------------------------------------------------------------------
- * Helpers
- * -------------------------------------------------------------------------------------------------*/
-async function getMyVendorOrThrow(): Promise<MyVendor> {
-  const {
-    data: { user },
-    error: uerr,
-  } = await supabase.auth.getUser();
-  if (uerr || !user)
-    throw new Error("You must be logged in to import products");
-  const { data, error } = await supabase.rpc("get_my_vendor");
-  if (error) throw error;
-  const v = (data?.[0] || null) as MyVendor | null;
-  if (!v?.id) throw new Error("You do not have a vendor account yet");
-  if (v.status !== "approved")
-    throw new Error(
-      `Your vendor account is '${v.status}'. Please wait for approval.`
-    );
-  return v;
+/* ──────────────────────────────────────────────────────────────
+   Helpers
+   ────────────────────────────────────────────────────────────── */
+const IMAGE_MAX_MB = 5;
+const VIDEO_MAX_MB = 50;
+const MAX_IMAGES_PER_PRODUCT = 5;
+
+function skuify(s: string): string {
+  // Uppercase, keep A–Z/0–9, collapse to hyphens
+  return s
+    .toUpperCase()
+    .trim()
+    .replace(/[^A-Z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 40); // keep tidy
 }
 
-const toInt = (v: any) =>
-  v === "" || v == null ? null : parseInt(String(v), 10);
-const excelSerialToISO = (n: number) => {
-  const excelEpoch = new Date(Date.UTC(1899, 11, 30)); // 1899-12-30
-  const ms = Math.round(n * 86400000);
-  return new Date(excelEpoch.getTime() + ms).toISOString();
-};
-const toISODate = (v: any) => {
-  if (v == null || v === "") return null;
-  if (v instanceof Date) return v.toISOString();
-  if (typeof v === "number") return excelSerialToISO(v);
-  const d = new Date(String(v).trim());
-  return isNaN(d.getTime()) ? null : d.toISOString();
-};
-const parseBool = (v: any) => {
+function makeUniqueSku(base: string, used: Set<string>): string {
+  let sku = base || "SKU";
+  if (!used.has(sku)) {
+    used.add(sku);
+    return sku;
+  }
+  let k = 2;
+  while (used.has(`${sku}-${k}`)) k++;
+  const uniq = `${sku}-${k}`;
+  used.add(uniq);
+  return uniq;
+}
+
+function toInt(v: any): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.trunc(n) : null;
+}
+function toNumOrNull(v: any): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+function parseBool(v: any): boolean {
   if (typeof v === "boolean") return v;
-  if (v == null) return false;
-  const s = String(v).trim().toLowerCase();
-  return s === "true" || s === "1" || s === "yes";
-};
-const toNumOrNull = (v: any) => (v === "" || v == null ? null : Number(v));
-const safeJSON = (s?: string | null) => {
-  if (!s) return {};
+  const s = String(v ?? "")
+    .trim()
+    .toLowerCase();
+  return ["1", "true", "yes", "y"].includes(s);
+}
+function toISODate(v: any): string | null {
+  if (!v && v !== 0) return null;
+  if (typeof v === "number" && Number.isFinite(v)) {
+    const d = XLSX.SSF.parse_date_code(v);
+    if (!d) return null;
+    const dt = new Date(
+      Date.UTC(d.y, d.m - 1, d.d, d.H || 0, d.M || 0, d.S || 0)
+    );
+    return dt.toISOString();
+  }
+  const date = new Date(v);
+  return isNaN(+date) ? null : date.toISOString();
+}
+function safeJSON(raw: any): any {
+  if (raw == null || raw === "") return null;
   try {
-    return JSON.parse(s);
+    return JSON.parse(String(raw));
   } catch {
-    return {};
+    return null;
   }
-};
-
-// put near your other helpers
-const safeKeyPart = (s: string) =>
-  s
-    .normalize('NFKC')      // normalize unicode (kills NBSP surprises)
-    .trim()                 // remove leading/trailing whitespace
-    .replace(/\s+/g, '-')   // collapse spaces -> dashes
-    .replace(/[^\w.\-]/g, '') // keep [A-Za-z0-9 _ . -], drop the rest
-
-
-const parseBenefits = (v: any): string[] => {
-  const s = (v ?? "").toString().trim();
-  if (!s) return [];
-  try {
-    const j = JSON.parse(s);
-    if (Array.isArray(j)) return j.map((x) => String(x).trim()).filter(Boolean);
-  } catch {}
-  return s
-    .split(/[\n;,]/)
-    .map((x) => x.trim())
+}
+function parseList(v: any): string[] {
+  if (!v) return [];
+  return String(v)
+    .split(/[|,]/)
+    .map((s) => s.trim())
     .filter(Boolean);
-};
-const parseFAQ = (v: any): Array<{ q: string; a: string }> => {
-  const s = (v ?? "").toString().trim();
-  if (!s) return [];
-  try {
-    const j = JSON.parse(s);
-    if (Array.isArray(j))
-      return j
-        .map((x: any) => ({
-          q: String(x?.q ?? "").trim(),
-          a: String(x?.a ?? "").trim(),
-        }))
-        .filter((x) => x.q || x.a);
-  } catch {}
-  return s
+}
+function parseFaq(v: any): Array<{ q: string; a: string }> {
+  if (!v) return [];
+  return String(v)
     .split("||")
-    .map((pair) => pair.trim())
-    .filter(Boolean)
     .map((pair) => {
-      const [q, a] = pair.split("|");
-      return {
-        q: String(q ?? "")
-          .replace(/^Q:\s*/i, "")
-          .trim(),
-        a: String(a ?? "")
-          .replace(/^A:\s*/i, "")
-          .trim(),
-      };
+      const [q, a] = pair.split("::").map((s) => (s ?? "").trim());
+      if (!q && !a) return null;
+      return { q: q || "", a: a || "" };
     })
-    .filter((x) => x.q || x.a);
-};
-
-const buildChosenFileMap = (files: File[]) => {
-  const m = new Map<string, true>();
-  for (const f of files || []) m.set(f.name, true);
-  return m;
-};
-const buildMediaBySku = (media: { sku?: string; filename?: string }[]) => {
-  const m = new Map<string, Set<string>>();
-  for (const row of media || []) {
-    const sku = String(row.sku ?? "").trim();
-    const file = String(row.filename ?? "").trim();
-    if (!sku || !file) continue;
-    let set = m.get(sku);
-    if (!set) {
-      set = new Set();
-      m.set(sku, set);
-    }
-    set.add(file);
-  }
-  return m;
-};
-
-// small concurrency util
+    .filter(Boolean) as Array<{ q: string; a: string }>;
+}
+function safeKeyPart(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
 async function mapLimit<T, R>(
-  items: T[],
+  arr: T[],
   limit: number,
-  mapper: (item: T, i: number) => Promise<R>
+  fn: (v: T, i: number) => Promise<R>
 ): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  const running = new Set<Promise<void>>();
-  let i = 0;
-  const enqueue = () => {
-    if (i >= items.length) return Promise.resolve();
-    const idx = i++;
-    const p = (async () => {
-      results[idx] = await mapper(items[idx], idx);
-    })();
-    running.add(p);
-    const clean = p.then(() => running.delete(p));
-    let r = Promise.resolve();
-    if (running.size >= limit) r = Promise.race(running) as Promise<void>;
-    return r.then(() => enqueue());
-  };
-  await enqueue();
-  await Promise.all(running);
-  return results;
+  const ret: R[] = new Array(arr.length);
+  let next = 0;
+  const workers = Array(Math.min(limit, arr.length))
+    .fill(0)
+    .map(async () => {
+      while (true) {
+        const i = next++;
+        if (i >= arr.length) break;
+        ret[i] = await fn(arr[i], i);
+      }
+    });
+  await Promise.all(workers);
+  return ret;
 }
 
-/* -------------------------------------------------------------------------------------------------
- * Component (Bulk Upload only)
- * -------------------------------------------------------------------------------------------------*/
-export function ProductForm(_props: ProductFormProps) {
-  // files & parsed data
-  const [bulkExcelFile, setBulkExcelFile] = useState<File | null>(null);
-  const [bulkMediaFiles, setBulkMediaFiles] = useState<File[]>([]);
+function isImage(f: File) {
+  return f.type.startsWith("image/");
+}
+function isVideo(f: File) {
+  return f.type.startsWith("video/");
+}
+function withinSize(f: File) {
+  const mb = f.size / (1024 * 1024);
+  if (isImage(f)) return mb <= IMAGE_MAX_MB;
+  if (isVideo(f)) return mb <= VIDEO_MAX_MB;
+  return false;
+}
+
+function slugify(s: string): string {
+  return s
+    .toLowerCase()
+    .trim()
+    .replace(/['"]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function makeUniqueSlug(base: string, used: Set<string>): string {
+  let slug = base;
+  let k = 2;
+  while (used.has(slug)) slug = `${base}-${k++}`;
+  used.add(slug);
+  return slug;
+}
+
+function downloadBlob(
+  buf: ArrayBuffer,
+  filename: string,
+  mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+) {
+  const blob = new Blob([buf], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Component
+   ────────────────────────────────────────────────────────────── */
+export function ProductForm() {
+  const [excelFile, setExcelFile] = useState<File | null>(null);
+  const [bulkChosenFiles, setBulkChosenFiles] = useState<File[]>([]);
   const [bulkProducts, setBulkProducts] = useState<BulkProductRow[]>([]);
   const [bulkMedia, setBulkMedia] = useState<BulkMediaRow[]>([]);
-  const [bulkOverwriteImages, setBulkOverwriteImages] = useState(true);
-  const [bulkReplaceImages, setBulkReplaceImages] = useState(true);
+  const [bulkVideos, setBulkVideos] = useState<BulkVideoRow[]>([]);
 
-  // progress + state
+  const [bulkOverwriteImages, setBulkOverwriteImages] = useState(false);
+  const [bulkReplaceImages, setBulkReplaceImages] = useState(false);
   const [bulkValidated, setBulkValidated] = useState(false);
-  const [bulkBusy, setBulkBusy] = useState(false);
-  const [bulkProgressMsg, setBulkProgressMsg] = useState("");
-  const [bulkProgress, setBulkProgress] = useState(0); // percent 0..100
   const [bulkIssues, setBulkIssues] = useState<string[]>([]);
+  const [bulkProgress, setBulkProgress] = useState(0);
+  const [busy, setBusy] = useState(false);
 
-  const bulkMediaFileMap = new Map<string, File>(
-    bulkMediaFiles.map((f) => [f.name, f])
+  const chosenNames = useMemo(
+    () => new Set(bulkChosenFiles.map((f) => f.name.toLowerCase())),
+    [bulkChosenFiles]
   );
 
-  const resetBulkState = () => {
+  /* ── Template (single sheet) ── */
+// npm i exceljs
+async function bulkDownloadTemplate() {
+  const [{ data: brands }, { data: categories }] = await Promise.all([
+    supabase.from("brands").select("slug").order("slug", { ascending: true }),
+    supabase.from("categories").select("slug").order("slug", { ascending: true }),
+  ]);
+  const brandSlugs = (brands ?? []).map(b => b.slug).filter(Boolean);
+  const categorySlugs = (categories ?? []).map(c => c.slug).filter(Boolean);
+
+  const ExcelJS = (await import("exceljs")).default;
+  const wb = new ExcelJS.Workbook();
+
+  // Hidden lookup sheets (A column lists slugs)
+  const wsBrands = wb.addWorksheet("brands", { state: "veryHidden" });
+  const wsCats   = wb.addWorksheet("categories", { state: "veryHidden" });
+  (brandSlugs.length ? brandSlugs : ["brand-slug"]).forEach((s, i) => wsBrands.getCell(i + 1, 1).value = s);
+  (categorySlugs.length ? categorySlugs : ["category-slug"]).forEach((s, i) => wsCats.getCell(i + 1, 1).value = s);
+
+  const lastBrand = Math.max(1, brandSlugs.length);
+  const lastCat   = Math.max(1, categorySlugs.length);
+  const brandRange = `'brands'!$A$1:$A$${lastBrand}`;
+  const catRange   = `'categories'!$A$1:$A$${lastCat}`;
+
+  // Main sheet — define columns FIRST
+  const ws = wb.addWorksheet("Products");
+  ws.columns = [
+    { header: "sku", key: "sku", width: 18 },
+    { header: "slug", key: "slug", width: 26 },
+    { header: "name", key: "name", width: 34 },
+    { header: "brand_slug", key: "brand_slug", width: 22 },
+    { header: "category_slug", key: "category_slug", width: 24 },
+    { header: "price", key: "price", width: 12 },
+    { header: "currency", key: "currency", width: 10 },
+    { header: "short_description", key: "short_description", width: 40 },
+    { header: "description", key: "description", width: 50 },
+
+    { header: "image1_filename", key: "image1_filename", width: 22 },
+    { header: "image1_alt", key: "image1_alt", width: 22 },
+    { header: "image1_sort", key: "image1_sort", width: 12 },
+
+    { header: "image2_filename", key: "image2_filename", width: 22 },
+    { header: "image2_alt", key: "image2_alt", width: 22 },
+    { header: "image2_sort", key: "image2_sort", width: 12 },
+
+    { header: "image3_filename", key: "image3_filename", width: 22 },
+    { header: "image3_alt", key: "image3_alt", width: 22 },
+    { header: "image3_sort", key: "image3_sort", width: 12 },
+
+    { header: "image4_filename", key: "image4_filename", width: 22 },
+    { header: "image4_alt", key: "image4_alt", width: 22 },
+    { header: "image4_sort", key: "image4_sort", width: 12 },
+
+    { header: "image5_filename", key: "image5_filename", width: 22 },
+    { header: "image5_alt", key: "image5_alt", width: 22 },
+    { header: "image5_sort", key: "image5_sort", width: 12 },
+
+    { header: "video_filename", key: "video_filename", width: 22 },
+    { header: "video_alt", key: "video_alt", width: 22 },
+
+    { header: "is_published", key: "is_published", width: 12 },
+    { header: "compare_at_price", key: "compare_at_price", width: 16 },
+    { header: "sale_price", key: "sale_price", width: 12 },
+    { header: "sale_starts_at", key: "sale_starts_at", width: 18 },
+    { header: "sale_ends_at", key: "sale_ends_at", width: 18 },
+
+    { header: "made_in_korea", key: "made_in_korea", width: 14 },
+    { header: "is_vegetarian", key: "is_vegetarian", width: 14 },
+    { header: "cruelty_free", key: "cruelty_free", width: 12 },
+    { header: "toxin_free", key: "toxin_free", width: 12 },
+    { header: "paraben_free", key: "paraben_free", width: 12 },
+
+    { header: "meta_title", key: "meta_title", width: 28 },
+    { header: "meta_description", key: "meta_description", width: 40 },
+    { header: "ingredients_md", key: "ingredients_md", width: 40 },
+    { header: "key_features_md", key: "key_features_md", width: 40 },
+    { header: "additional_details_md", key: "additional_details_md", width: 40 },
+    { header: "attributes_json", key: "attributes_json", width: 28 },
+    { header: "faq", key: "faq", width: 34 },
+    { header: "key_benefits", key: "key_benefits", width: 28 },
+
+    { header: "volume_ml", key: "volume_ml", width: 12 },
+    { header: "net_weight_g", key: "net_weight_g", width: 12 },
+    { header: "country_of_origin", key: "country_of_origin", width: 16 },
+  ];
+  ws.views = [{ state: "frozen", ySplit: 1 }];
+
+  // Helper: write a row by keys (prevents any addRow issues)
+  const keys = ws.columns.map(c => String(c.key));
+  function writeRow(rowIndex: number, obj: Record<string, any>) {
+    keys.forEach((k, i) => {
+      const v = Object.prototype.hasOwnProperty.call(obj, k) ? obj[k] : "";
+      ws.getCell(rowIndex, i + 1).value = v === undefined ? "" : v;
+    });
+  }
+
+  // Sample rows (write BEFORE validation)
+  const ex1 = {
+    sku: "ABC-001",
+    slug: "",
+    name: "Example Product",
+    brand_slug: brandSlugs[0] ?? "brand-slug",
+    category_slug: categorySlugs[0] ?? "category-slug",
+    price: 999, currency: "INR",
+    short_description: "Short one-liner.",
+    description: "Long description…",
+    image1_filename: "hero.jpg",  image1_alt: "Front",  image1_sort: 0,
+    image2_filename: "angle.jpg", image2_alt: "Angle",  image2_sort: 1,
+    image3_filename: "", image3_alt: "", image3_sort: "",
+    image4_filename: "", image4_alt: "", image4_sort: "",
+    image5_filename: "", image5_alt: "", image5_sort: "",
+    video_filename: "demo.mp4",   video_alt: "30s demo",
+    is_published: true, compare_at_price: "", sale_price: "",
+    sale_starts_at: "", sale_ends_at: "",
+    made_in_korea: true, is_vegetarian: true, cruelty_free: true, toxin_free: true, paraben_free: true,
+    meta_title: "SEO Title", meta_description: "SEO description…",
+    ingredients_md: "- Water\n- Glycerin",
+    key_features_md: "- Feature A\n- Feature B",
+    additional_details_md: "",
+    attributes_json: "{\"shade\":\"01\",\"size\":\"100ml\"}",
+    faq: "Q1?::A1||Q2?::A2",
+    key_benefits: "Hydrating|Brightening|Soothing",
+    volume_ml: 100, net_weight_g: "", country_of_origin: "Korea",
+  };
+
+  writeRow(2, ex1);
+
+  // Wrap long text columns
+  ["short_description","description","ingredients_md","key_features_md","additional_details_md","meta_description"]
+    .forEach(key => { ws.getColumn(key).alignment = { wrapText: true }; });
+
+  // Data validation (after rows are written). Use direct ranges, NO "=".
+  for (let r = 2; r <= 5000; r++) {
+    ws.getCell(`D${r}`).dataValidation = {
+      type: "list", allowBlank: true, formulae: [brandRange],
+      showErrorMessage: true, errorStyle: "warning",
+      errorTitle: "Invalid brand", error: "Pick a brand from the list.",
+    };
+    ws.getCell(`E${r}`).dataValidation = {
+      type: "list", allowBlank: true, formulae: [catRange],
+      showErrorMessage: true, errorStyle: "warning",
+      errorTitle: "Invalid category", error: "Pick a category from the list.",
+    };
+  }
+
+  // Download
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "bulk_products_template.xlsx";
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+
+
+
+
+
+  /* ── Parse Excel (single sheet) ── */
+  async function bulkOnExcelChosen(file: File) {
     setBulkIssues([]);
     setBulkProgress(0);
-    setBulkProgressMsg("");
-    setBulkValidated(false);
-  };
-  const resetBulkSession = () => {
-    setBulkExcelFile(null);
-    setBulkMediaFiles([]);
-    setBulkProducts([]);
-    setBulkMedia([]);
-    resetBulkState();
-  };
 
-  /* ------------------------------- Template download --------------------------------- */
-  const bulkDownloadTemplate = async () => {
-    const [{ data: cats }, { data: brs }] = await Promise.all([
-      supabase.from("categories").select("slug").order("slug"),
-      supabase.from("brands").select("slug").order("slug"),
-    ]);
-    const categorySlugs = (cats || []).map((c) => c.slug);
-    const brandSlugs = (brs || []).map((b) => b.slug);
-
-    const wb = new ExcelJS.Workbook();
-    const wsProd = wb.addWorksheet("Products");
-
-    const prodHeaders = [
-      // core
-      "sku",
-      "slug",
-      "name",
-      "short_description",
-      "description",
-      "brand_slug",
-      "price",
-      "currency",
-      "country_of_origin",
-      "volume_ml",
-      "net_weight_g",
-      "category_slug",
-      "is_published",
-      "hero_image_filename",
-      "attributes_json",
-
-      // pricing / merch / SEO
-      "compare_at_price",
-      "sale_price",
-      "sale_starts_at",
-      "sale_ends_at",
-      "is_featured",
-      "featured_rank",
-      "is_trending",
-      "new_until",
-      "meta_title",
-      "meta_description",
-      "og_image_filename",
-
-      // rich text (Markdown)
-      "ingredients_md",
-      "key_features_md",
-      "additional_details_md",
-
-      // JSON-ish
-      "faq",
-      "key_benefits",
-
-      // badge booleans
-      "made_in_korea",
-      "is_vegetarian",
-      "cruelty_free",
-      "toxin_free",
-      "paraben_free",
-    ];
-    wsProd.addRow(prodHeaders);
-
-    // example row
-    wsProd.addRow([
-      "ST-SSP-50",
-      "skintectonic-soothing-sun-plus",
-      "Skintectonic Soothing Sun Plus",
-      "Lightweight SPF 50+ sunscreen",
-      "Broad-spectrum sunscreen with soothing ingredients.",
-      "skintectonic",
-      "",
-      "INR",
-      "Korea",
-      "50",
-      "",
-      "sunscreen",
-      "TRUE",
-      "skintectonic-soothing-sun-plus-hero.jpg",
-      '{"SPF":"50+","PA":"PA++++"}',
-      "",
-      "",
-      "",
-      "",
-      "FALSE",
-      "",
-      "FALSE",
-      "",
-      "",
-      "",
-      "skintectonic-soothing-sun-plus-og.jpg",
-      "**Key Ingredients**\n- Niacinamide (5%)\n- Green Tea Extract",
-      "- Lightweight texture\n- Absorbs quickly",
-      "**How to Use**\n1. Cleanse\n2. Apply 2–3 drops\n\n**Storage**\n- Keep below 30°C",
-      "Q: Is it for oily skin?|A: Yes || Q: Fragrance free?|A: Yes",
-      "Hydrates; Brightens",
-      "TRUE",
-      "TRUE",
-      "TRUE",
-      "TRUE",
-      "TRUE",
-    ]);
-
-    // widths
-    wsProd.columns = Array.from({ length: prodHeaders.length }, (_, i) => ({
-      width:
-        [
-          16, 34, 40, 42, 60, 18, 12, 10, 18, 12, 12, 18, 14, 34, 80, 16, 14,
-          16, 16, 12, 14, 12, 16, 40, 60, 28, 22, 22, 28, 24, 20, 14, 14, 14,
-          16, 16,
-        ].at(i) || 22,
-    }));
-
-    // Lookups (veryHidden)
-    const wsCat = wb.addWorksheet("CategoryLookup");
-    wsCat.addRow(["slug"]);
-    categorySlugs.forEach((s) => wsCat.addRow([s]));
-    wsCat.state = "veryHidden";
-    const wsBrand = wb.addWorksheet("BrandLookup");
-    wsBrand.addRow(["slug"]);
-    brandSlugs.forEach((s) => wsBrand.addRow([s]));
-    wsBrand.state = "veryHidden";
-
-    // validations
-    const brandFormula = `BrandLookup!$A$2:$A$${Math.max(
-      2,
-      1 + brandSlugs.length
-    )}`;
-    const catFormula = `CategoryLookup!$A$2:$A$${Math.max(
-      2,
-      1 + categorySlugs.length
-    )}`;
-    const startRow = 2,
-      endRow = 5000;
-    const col = (n: number) => wsProd.getColumn(n).letter;
-
-    const C_BRAND = prodHeaders.indexOf("brand_slug") + 1;
-    const C_CAT = prodHeaders.indexOf("category_slug") + 1;
-    const C_CMP = prodHeaders.indexOf("compare_at_price") + 1;
-    const C_SAL = prodHeaders.indexOf("sale_price") + 1;
-    const C_SST = prodHeaders.indexOf("sale_starts_at") + 1;
-    const C_SEN = prodHeaders.indexOf("sale_ends_at") + 1;
-    const C_FRK = prodHeaders.indexOf("featured_rank") + 1;
-    const C_NEW = prodHeaders.indexOf("new_until") + 1;
-
-    const BOOL_COLS = [
-      "is_published",
-      "is_featured",
-      "is_trending",
-      "made_in_korea",
-      "is_vegetarian",
-      "cruelty_free",
-      "toxin_free",
-      "paraben_free",
-    ]
-      .map((h) => prodHeaders.indexOf(h) + 1)
-      .filter((n) => n > 0);
-
-    for (let r = startRow; r <= endRow; r++) {
-      const A1 = (c: number) => `${col(c)}${r}`;
-
-      wsProd.getCell(A1(C_BRAND)).dataValidation = brandSlugs.length
-        ? { type: "list", allowBlank: false, formulae: [brandFormula] }
-        : { type: "list", allowBlank: true, formulae: ['""'] };
-
-      wsProd.getCell(A1(C_CAT)).dataValidation = categorySlugs.length
-        ? { type: "list", allowBlank: false, formulae: [catFormula] }
-        : { type: "list", allowBlank: true, formulae: ['""'] };
-
-      wsProd.getCell(A1(C_CMP)).dataValidation = {
-        type: "decimal",
-        allowBlank: true,
-      };
-      wsProd.getCell(A1(C_SAL)).dataValidation = {
-        type: "decimal",
-        allowBlank: true,
-      };
-      wsProd.getCell(A1(C_SST)).dataValidation = {
-        type: "date",
-        allowBlank: true,
-      };
-      wsProd.getCell(A1(C_SEN)).dataValidation = {
-        type: "date",
-        allowBlank: true,
-      };
-      wsProd.getCell(A1(C_FRK)).dataValidation = {
-        type: "whole",
-        allowBlank: true,
-        operator: "greaterThanOrEqual",
-        formulae: [0],
-      };
-      wsProd.getCell(A1(C_NEW)).dataValidation = {
-        type: "date",
-        allowBlank: true,
-      };
-
-      for (const c of BOOL_COLS) {
-        wsProd.getCell(A1(c)).dataValidation = {
-          type: "list",
-          allowBlank: true,
-          formulae: ['"TRUE,FALSE"'],
-        };
-      }
-    }
-
-    const wsMedia = wb.addWorksheet("Media");
-    wsMedia.addRow(["sku", "filename", "alt", "sort_order"]);
-    wsMedia.addRow([
-      "ST-SSP-50",
-      "skintectonic-soothing-sun-plus-hero.jpg",
-      "Front angle",
-      0,
-    ]);
-    wsMedia.addRow([
-      "ST-SSP-50",
-      "skintectonic-soothing-sun-plus-og.jpg",
-      "OG image",
-      1,
-    ]);
-
-    const blob = await wb.xlsx.writeBuffer();
-    const url = URL.createObjectURL(
-      new Blob([blob], {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      })
-    );
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "bulk_products_template.xlsx";
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  /* ------------------------------- Excel choose & parse --------------------------------- */
-  const bulkOnExcelChosen = async (file: File | null) => {
-    if (!file) return;
-    resetBulkState();
-    setBulkExcelFile(file);
-    const data = await file.arrayBuffer();
-    const wb = XLSX.read(data, { type: "array" });
-    const wsProd = wb.Sheets["Products"];
-    const wsMedia = wb.Sheets["Media"];
-    if (!wsProd || !wsMedia) {
-      toast.error("Workbook must contain 'Products' and 'Media'");
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: "array" });
+    const ws = wb.Sheets["Products"] || wb.Sheets[wb.SheetNames[0]];
+    if (!ws) {
+      setBulkIssues(["No 'Products' sheet found"]);
       return;
     }
-    const prodRows = XLSX.utils.sheet_to_json<any>(wsProd, {
-      defval: "",
-      raw: true,
-    });
-    const mediaRows = XLSX.utils.sheet_to_json<any>(wsMedia, {
-      defval: "",
-      raw: true,
-    });
 
-    const parsedProducts: BulkProductRow[] = prodRows
-      .map((r: any) => ({
-        sku: String(r.sku ?? r.SKU ?? "").trim(),
-        slug: String(r.slug ?? "").trim(),
-        name: String(r.name ?? "").trim(),
-        short_description:
-          String(r.short_description ?? "").trim() || undefined,
-        description: String(r.description ?? "").trim() || undefined,
-        brand_slug: String(r.brand_slug ?? "").trim(),
+    const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: "" });
+
+    const products: BulkProductRow[] = [];
+    const media: BulkMediaRow[] = [];
+    const videos: BulkVideoRow[] = [];
+
+    // Track uniqueness inside this sheet
+    const usedSlugs = new Set<string>();
+    const usedSkus = new Set<string>();
+    const autoSkuRowIdx: number[] = []; // rows where SKU was auto-generated
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+
+      const name = (r.name || "").trim();
+
+      // ---- SKU: generate when blank, unique within the sheet ----
+      let sku = (r.sku || "").trim();
+      let autoSku = false;
+      if (!sku) {
+        const seed = (r.slug || "").trim() || name || `PRODUCT-${i + 2}`;
+        const base = skuify(seed);
+        sku = makeUniqueSku(base, usedSkus);
+        autoSku = true;
+      } else {
+        const fixed = skuify(sku);
+        sku = makeUniqueSku(fixed, usedSkus);
+      }
+      if (autoSku) autoSkuRowIdx.push(i);
+
+      // ---- SLUG: generate when blank (prefer SKU), unique within the sheet ----
+      let rawSlug = (r.slug || "").trim();
+      if (!rawSlug) {
+        const base = slugify(sku || name || `product-${i + 2}`);
+        rawSlug = makeUniqueSlug(base, usedSlugs);
+      } else {
+        rawSlug = makeUniqueSlug(slugify(rawSlug), usedSlugs);
+      }
+
+      const p: BulkProductRow = {
+        sku,
+        slug: rawSlug,
+        name,
+        brand_slug: (r.brand_slug || "").trim() || null,
+        category_slug: (r.category_slug || "").trim() || null,
         price: toNumOrNull(r.price),
-        currency: r.currency ? String(r.currency).trim() : null,
-        country_of_origin: r.country_of_origin
-          ? String(r.country_of_origin).trim()
-          : null,
-        volume_ml: toNumOrNull(r.volume_ml),
-        net_weight_g: toNumOrNull(r.net_weight_g),
-        category_slug: String(r.category_slug ?? "").trim(),
+        currency: r.currency || null,
+        short_description: r.short_description || null,
+        description: r.description || null,
+
+        // legacy hero/og not used in sheet
+        hero_image_filename: null,
+        og_image_filename: null,
+
         is_published: parseBool(r.is_published),
-        hero_image_filename: r.hero_image_filename
-          ? String(r.hero_image_filename).trim()
-          : null,
-        attributes_json: r.attributes_json
-          ? String(r.attributes_json).trim()
-          : null,
+        compare_at_price: toNumOrNull(r.compare_at_price),
+        sale_price: toNumOrNull(r.sale_price),
+        sale_starts_at: toISODate(r.sale_starts_at),
+        sale_ends_at: toISODate(r.sale_ends_at),
 
-        // rich text
-        ingredients_md: String(r.ingredients_md ?? "").trim() || undefined,
-        key_features_md: String(r.key_features_md ?? "").trim() || undefined,
-        additional_details_md:
-          String(r.additional_details_md ?? "").trim() || undefined,
-
-        // arrays
-        faq: parseFAQ(r.faq),
-        key_benefits: parseBenefits(r.key_benefits),
-
-        // badges
         made_in_korea: parseBool(r.made_in_korea),
         is_vegetarian: parseBool(r.is_vegetarian),
         cruelty_free: parseBool(r.cruelty_free),
         toxin_free: parseBool(r.toxin_free),
         paraben_free: parseBool(r.paraben_free),
 
-        // pricing / merch / SEO
-        compare_at_price: toNumOrNull(r.compare_at_price),
-        sale_price: toNumOrNull(r.sale_price),
-        sale_starts_at: toISODate(r.sale_starts_at),
-        sale_ends_at: toISODate(r.sale_ends_at),
-        is_featured:
-          typeof r.is_featured === "boolean"
-            ? r.is_featured
-            : String(r.is_featured ?? "").trim(),
-        featured_rank: toInt(r.featured_rank),
-        is_trending:
-          typeof r.is_trending === "boolean"
-            ? r.is_trending
-            : String(r.is_trending ?? "").trim(),
-        new_until: toISODate(r.new_until),
-        meta_title: r.meta_title ? String(r.meta_title).trim() : null,
-        meta_description: r.meta_description
-          ? String(r.meta_description).trim()
-          : null,
-        og_image_filename: r.og_image_filename
-          ? String(r.og_image_filename).trim()
-          : null,
-      }))
-      .filter((p) => p.sku || p.slug || p.name);
+        meta_title: r.meta_title || null,
+        meta_description: r.meta_description || null,
+        ingredients_md: r.ingredients_md || null,
+        key_features_md: r.key_features_md || null,
+        additional_details_md: r.additional_details_md || null,
+        attributes_json: r.attributes_json || null,
+        faq: parseFaq(r.faq),
+        key_benefits: parseList(r.key_benefits),
 
-    const parsedMedia: BulkMediaRow[] = mediaRows
-      .map((r: any) => ({
-        sku: String(r.sku ?? r.SKU ?? "").trim(),
-        filename: String(r.filename ?? r.FILENAME ?? "").trim(),
-        alt: r.alt ? String(r.alt).trim() : null,
-        sort_order: toNumOrNull(r.sort_order),
-      }))
-      .filter((m) => m.sku && m.filename);
+        volume_ml: toNumOrNull(r.volume_ml),
+        net_weight_g: toNumOrNull(r.net_weight_g),
+        country_of_origin: r.country_of_origin || null,
+      };
 
-    setBulkProducts(parsedProducts);
-    setBulkMedia(parsedMedia);
-    toast.success(
-      `Parsed ${parsedProducts.length} products and ${parsedMedia.length} media rows`
-    );
-  };
+      // images 1..5 (ALT fallback uses product name; “– View N” for subsequent)
+      let added = 0;
+      for (let idx = 1; idx <= 5; idx++) {
+        const fn = (r[`image${idx}_filename`] || "").trim();
+        const altRaw = (r[`image${idx}_alt`] || "").trim();
+        const srt = r[`image${idx}_sort`];
+        if (!fn) continue;
+        const sort = srt === "" || srt == null ? idx - 1 : toInt(srt);
+        const alt =
+          altRaw ||
+          (name ? `${name}${added ? ` – View ${added + 1}` : ""}` : null);
+        added += 1;
+        media.push({
+          sku: p.sku,
+          filename: fn,
+          alt,
+          sort_order: Number.isFinite(sort as number)
+            ? (sort as number)
+            : idx - 1,
+        });
+      }
 
-  /* ------------------------------- Media choose --------------------------------- */
-  const bulkOnMediaChosen = (files: FileList | null) => {
-    if (!files) return;
-    resetBulkState();
-    setBulkMediaFiles((prev) => [...prev, ...Array.from(files)]);
-  };
+      // single video (ALT fallback)
+      const vf = (r.video_filename || "").trim();
+      const va = (r.video_alt || "").trim();
+      if (vf)
+        videos.push({
+          sku: p.sku,
+          filename: vf,
+          alt: va || (name ? `${name} – Video` : null),
+        });
 
-  /* ------------------------------- Validate --------------------------------- */
-  const bulkValidateAll = async (): Promise<boolean> => {
-    const issues: string[] = [];
-    setBulkIssues([]);
-    setBulkValidated(false);
-    setBulkProgress(0);
+      if (p.slug || p.sku || p.name) products.push(p);
 
-    try {
-      await getMyVendorOrThrow();
-    } catch (e: any) {
-      issues.push(e?.message || "Vendor not approved");
-      setBulkIssues(issues);
-      return false;
+      if (i % 25 === 0) {
+        setBulkProgress(Math.round(((i + 1) / Math.max(1, rows.length)) * 40));
+      }
     }
 
-    if (!bulkProducts?.length) {
-      issues.push(
-        "No products found in the Excel. Please load the Products sheet."
-      );
-      setBulkIssues(issues);
-      setBulkProgress(100);
-      return false;
-    }
+    // ---- OPTIONAL: avoid DB SKU collisions for ONLY auto-generated SKUs ----
+    if (autoSkuRowIdx.length) {
+      const genSkus = autoSkuRowIdx
+        .map((ri) => products[ri].sku!)
+        .filter(Boolean);
+      const { data: usedDbSkus, error } = await supabase
+        .from("products")
+        .select("sku")
+        .in("sku", genSkus);
 
-
-    
-    const [catRes, brRes] = await Promise.all([
-      supabase.from("categories").select("slug"),
-      supabase.from("brands").select("slug"),
-    ]);
-    const categorySet = new Set((catRes.data ?? []).map((x: any) => x.slug));
-    const brandSet = new Set((brRes.data ?? []).map((x: any) => x.slug));
-
-    const chosenFileMap = buildChosenFileMap(bulkMediaFiles || []);
-    const mediaBySku = buildMediaBySku(bulkMedia || []);
-    const isNonNeg = (v: any) => v == null || Number(v) >= 0;
-
-    for (let i = 0; i < bulkProducts.length; i++) {
-
-      
-      const p = bulkProducts[i]!;
-      const label = p.slug || p.sku || `row#${i + 2}`;
-
-
-      
-      const missing: string[] = [];
-      if (!p.sku) missing.push("sku");
-      if (!p.slug) missing.push("slug");
-      if (!p.name) missing.push("name");
-      if (!p.category_slug) missing.push("category_slug");
-      if (!p.brand_slug) missing.push("brand_slug");
-      if (missing.length)
-        issues.push(`Product '${label}': missing → ${missing.join(", ")}`);
-
-      if (p.category_slug && !categorySet.has(p.category_slug)) {
-        issues.push(
-          `Product '${label}': category_slug '${p.category_slug}' not found`
+      if (!error && usedDbSkus?.length) {
+        const dbSet = new Set<string>(
+          usedDbSkus.map((x: any) => (x.sku as string).toUpperCase())
         );
-      }
-      if (p.brand_slug && !brandSet.has(p.brand_slug)) {
-        issues.push(
-          `Product '${label}': brand_slug '${p.brand_slug}' not found`
-        );
-      }
-
-      const mediaSet = mediaBySku.get(p.sku) || new Set<string>();
-      if (mediaSet.size === 0)
-        issues.push(
-          `Product '${label}': no Media rows found for SKU '${p.sku}'`
-        );
-
-      if (!p.hero_image_filename) {
-        issues.push(`Product '${label}': hero_image_filename is required`);
-      } else {
-        const hero = p.hero_image_filename.trim();
-        if (!mediaSet.has(hero))
-          issues.push(
-            `Product '${label}': hero_image_filename '${hero}' not listed in Media sheet`
-          );
-        if (!chosenFileMap.has(hero))
-          issues.push(
-            `Product '${label}': hero_image_filename '${hero}' not among selected files`
-          );
-      }
-      if (p.og_image_filename) {
-        const og = p.og_image_filename.trim();
-        if (!mediaSet.has(og))
-          issues.push(
-            `Product '${label}': og_image_filename '${og}' not listed in Media sheet`
-          );
-        if (!chosenFileMap.has(og))
-          issues.push(
-            `Product '${label}': og_image_filename '${og}' not among selected files`
-          );
-      }
-      for (const fname of mediaSet) {
-        if (!chosenFileMap.has(fname))
-          issues.push(
-            `SKU '${p.sku}': media file '${fname}' not among selected files`
-          );
-      }
-
-      (
-        [
-          "price",
-          "compare_at_price",
-          "sale_price",
-          "volume_ml",
-          "net_weight_g",
-        ] as const
-      ).forEach((k) => {
-        const v = (p as any)[k];
-        if (!isNonNeg(v)) issues.push(`Product '${label}': ${k} must be ≥ 0`);
-      });
-
-      if (
-        p.price != null &&
-        p.compare_at_price != null &&
-        Number(p.compare_at_price) < Number(p.price)
-      ) {
-        issues.push(`Product '${label}': compare_at_price must be ≥ price`);
-      }
-      if (p.sale_price != null) {
-        if (p.compare_at_price == null)
-          issues.push(
-            `Product '${label}': sale_price requires compare_at_price`
-          );
-        else if (Number(p.sale_price) > Number(p.compare_at_price))
-          issues.push(
-            `Product '${label}': sale_price must be ≤ compare_at_price`
-          );
-      }
-
-      if (p.sale_starts_at && p.sale_ends_at) {
-        const st = new Date(p.sale_starts_at);
-        const en = new Date(p.sale_ends_at);
-        if (isNaN(st.getTime()) || isNaN(en.getTime()) || st > en) {
-          issues.push(
-            `Product '${label}': sale_starts_at must be ≤ sale_ends_at`
-          );
+        for (const ri of autoSkuRowIdx) {
+          let s = products[ri].sku!;
+          if (!dbSet.has(s)) continue;
+          // bump suffix until not in sheet-used or DB
+          let k = 2,
+            next = `${s}-${k}`;
+          while (usedSkus.has(next) || dbSet.has(next)) next = `${s}-${++k}`;
+          // reserve new SKU & update product
+          usedSkus.add(next);
+          products[ri].sku = next;
         }
       }
+    }
 
-      if (i % 10 === 0) {
-        setBulkProgress(
-          Math.round(((i + 1) / Math.max(1, bulkProducts.length)) * 100)
+    setBulkProducts(products);
+    setBulkMedia(media);
+    setBulkVideos(videos);
+    setExcelFile(file);
+    setBulkProgress(40);
+  }
+
+  /* ── Choose files (images + video) ── */
+  async function bulkOnMediaChosen(files: FileList | File[]) {
+    const next = [...bulkChosenFiles];
+    const issues: string[] = [];
+
+    for (const f of Array.from(files)) {
+      if (!isImage(f) && !isVideo(f)) {
+        issues.push(`Unsupported type: ${f.name} (${f.type || "unknown"})`);
+        continue;
+      }
+      if (!withinSize(f)) {
+        issues.push(
+          `Too large: ${f.name} (${(f.size / 1024 / 1024).toFixed(1)} MB). ` +
+            `Max image ${IMAGE_MAX_MB}MB, video ${VIDEO_MAX_MB}MB.`
         );
+        continue;
+      }
+      if (next.some((x) => x.name.toLowerCase() === f.name.toLowerCase()))
+        continue;
+      next.push(f);
+    }
+
+    setBulkChosenFiles(next);
+    if (issues.length) setBulkIssues((prev) => [...prev, ...issues]);
+  }
+
+  /* ── Validate (no auth checks) ── */
+  async function bulkValidateAll(): Promise<boolean> {
+    const issues: string[] = [];
+
+    for (const p of bulkProducts) {
+      const label = p.slug || p.sku || p.name || "(unnamed)";
+      if (!p.sku) issues.push(`'${label}': sku is required`);
+      if (!p.slug) issues.push(`'${label}': slug is required`);
+      if (!p.name) issues.push(`'${label}': name is required`);
+      if (!p.brand_slug) issues.push(`'${label}': brand_slug is required`);
+      if (!p.category_slug)
+        issues.push(`'${label}': category_slug is required`);
+    }
+
+    const [brandRes, catRes] = await Promise.all([
+      supabase.from("brands").select("slug"),
+      supabase.from("categories").select("slug"),
+    ]);
+    const brandSet = new Set((brandRes.data ?? []).map((b: any) => b.slug));
+    const catSet = new Set((catRes.data ?? []).map((c: any) => c.slug));
+
+    for (const p of bulkProducts) {
+      const label = p.slug || p.sku || p.name || "(unnamed)";
+      if (p.brand_slug && !brandSet.has(p.brand_slug)) {
+        issues.push(`'${label}': unknown brand_slug '${p.brand_slug}'`);
+      }
+      if (p.category_slug && !catSet.has(p.category_slug)) {
+        issues.push(`'${label}': unknown category_slug '${p.category_slug}'`);
+      }
+    }
+
+    const imgsBySku = new Map<string, BulkMediaRow[]>();
+    for (const m of bulkMedia) {
+      if (!m.sku || !m.filename) continue;
+      const arr = imgsBySku.get(m.sku) ?? [];
+      arr.push(m);
+      imgsBySku.set(m.sku, arr);
+    }
+    const vidBySku = new Map<string, BulkVideoRow>();
+    for (const v of bulkVideos) {
+      if (v.sku && v.filename) vidBySku.set(v.sku, v);
+    }
+
+    for (const p of bulkProducts) {
+      const label = p.slug || p.sku || p.name || "(unnamed)";
+      const imgs = imgsBySku.get(p.sku || "") || [];
+      if (imgs.length > MAX_IMAGES_PER_PRODUCT) {
+        issues.push(`'${label}': more than ${MAX_IMAGES_PER_PRODUCT} images`);
+      }
+      for (const m of imgs) {
+        const need = m.filename.toLowerCase();
+        if (!chosenNames.has(need)) {
+          issues.push(`'${label}': image file not selected → ${need}`);
+        }
+      }
+      const v = vidBySku.get(p.sku || "");
+      if (v) {
+        const need = v.filename.toLowerCase();
+        if (!chosenNames.has(need)) {
+          issues.push(`'${label}': video file not selected → ${need}`);
+        }
+      }
+      if (
+        p.sale_price != null &&
+        p.compare_at_price != null &&
+        p.sale_price >= p.compare_at_price
+      ) {
+        issues.push(`'${label}': sale_price must be < compare_at_price`);
+      }
+      if (
+        p.sale_starts_at &&
+        p.sale_ends_at &&
+        p.sale_starts_at > p.sale_ends_at
+      ) {
+        issues.push(`'${label}': sale_starts_at must be <= sale_ends_at`);
       }
     }
 
     setBulkIssues(issues);
     const ok = issues.length === 0;
     setBulkValidated(ok);
-    setBulkProgress(100);
-    if (ok) toast.success("Validation passed");
-    else toast.error("Validation found issues");
     return ok;
-  };
+  }
 
-  /* ------------------------------- Upload images --------------------------------- */
-const bulkUploadImages = async () => {
-  setBulkBusy(true);
-  setBulkProgressMsg("Uploading images…");
-  setBulkProgress(0);
-
-  try {
+  /* ── Upload assets ── */
+  async function bulkUploadAssets() {
     const tasks: { key: string; file: File }[] = [];
+    const chosen = new Map(
+      bulkChosenFiles.map((f) => [f.name.toLowerCase(), f])
+    );
 
     for (const m of bulkMedia) {
-      const f = bulkMediaFileMap.get(m.filename);
+      const f = chosen.get(m.filename.toLowerCase());
       if (!f) continue;
-
-      const safeSku  = safeKeyPart(m.sku || '');
-      const safeName = safeKeyPart(m.filename);
-      const key      = `${safeSku}/${safeName}`;
-
-      // rename the browser File so DB + storage match
-      const renamed = new File([f], safeName, { type: f.type });
-      tasks.push({ key, file: renamed });
+      const key = `${safeKeyPart(m.sku || "")}/${safeKeyPart(f.name)}`;
+      tasks.push({ key, file: f });
     }
+    for (const v of bulkVideos) {
+      const f = chosen.get(v.filename.toLowerCase());
+      if (!f) continue;
+      const key = `${safeKeyPart(v.sku || "")}/video/${safeKeyPart(f.name)}`;
+      tasks.push({ key, file: f });
+    }
+
+    if (!tasks.length) return;
 
     let done = 0;
-    await mapLimit(tasks, 3, async (t) => {
+    const limit = 3;
+    await mapLimit(tasks, limit, async ({ key, file }) => {
       const { error } = await supabase.storage
         .from("product-media")
-        .upload(t.key, t.file, {
+        .upload(key, file, {
           upsert: bulkOverwriteImages,
-          cacheControl: "3600",
-          contentType: t.file.type || undefined,
+          cacheControl: "31536000",
+          contentType: file.type || undefined,
         });
-      if (error) throw new Error(`${t.key}: ${error.message}`);
+      if (error) throw new Error(`${key}: ${error.message}`);
       done += 1;
-      setBulkProgress(Math.round((done / tasks.length) * 100));
+      setBulkProgress(40 + Math.round((done / tasks.length) * 40)); // 40→80
     });
-
-    toast.success("Images uploaded");
-  } catch (e: any) {
-    toast.error(e?.message || "Upload failed");
-  } finally {
-    setBulkProgressMsg("");
-    setBulkBusy(false);
   }
-};
 
+  /* ── Upsert DB (products + product_images + video_path) ── */
+  function videoPathForSku(sku: string | null): string | null {
+    if (!sku) return null;
+    const v = bulkVideos.find((x) => x.sku === sku && x.filename);
+    return v ? `${safeKeyPart(sku)}/video/${safeKeyPart(v.filename)}` : null;
+  }
 
-  /* ------------------------------- Upsert DB --------------------------------- */
- /* ------------------------------- Upsert DB --------------------------------- */
-const bulkUpsertAll = async (): Promise<{ ok: boolean; issues: string[] }> => {
-  const issues: string[] = [];
-  setBulkIssues([]);
-  setBulkProgress(0);
+  // Drop-in replacement
+  async function bulkUpsertAll(): Promise<{ ok: boolean; issues: string[] }> {
+    const issues: string[] = [];
+    setBulkIssues([]);
+    setBulkProgress(80);
 
-  // 1) Get my vendor (and stop if not approved)
-  let myVendor: MyVendor;
-  try {
-    myVendor = await getMyVendorOrThrow();
-  } catch (e: any) {
-    issues.push(e?.message || "Vendor not approved");
+    try {
+      // 1) Dictionaries: map brand/category slugs -> ids
+      const [{ data: catRows, error: catErr }, { data: brRows, error: brErr }] =
+        await Promise.all([
+          supabase.from("categories").select("id,slug"),
+          supabase.from("brands").select("id,slug"),
+        ]);
+
+      if (catErr) issues.push(`Failed to load categories: ${catErr.message}`);
+      if (brErr) issues.push(`Failed to load brands: ${brErr.message}`);
+
+      const catMap = new Map<string, string>(
+        (catRows ?? []).map((c: any) => [c.slug, c.id])
+      );
+      const brMap = new Map<string, string>(
+        (brRows ?? []).map((b: any) => [b.slug, b.id])
+      );
+
+      // 2) Group media by SKU (images)
+      const mediaBySku = new Map<string, BulkMediaRow[]>();
+      for (const m of bulkMedia) {
+        const sku = (m.sku || "").trim();
+        if (!sku || !m.filename) continue;
+        const arr = mediaBySku.get(sku) ?? [];
+        arr.push(m);
+        mediaBySku.set(sku, arr);
+      }
+
+      // 3) Compute hero/og paths from first two images by sort_order
+      const heroOgBySku = new Map<
+        string,
+        { hero?: string | null; og?: string | null }
+      >();
+      for (const [sku, list] of mediaBySku) {
+        const sorted = list
+          .slice()
+          .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+        const safeSku = safeKeyPart(sku);
+        const hero = sorted[0]
+          ? `${safeSku}/${safeKeyPart(sorted[0].filename)}`
+          : null;
+        const og = sorted[1]
+          ? `${safeSku}/${safeKeyPart(sorted[1].filename)}`
+          : null;
+        heroOgBySku.set(sku, { hero, og });
+      }
+
+      // 4) Single video path by SKU (last one wins if multiple supplied)
+      const videoPathBySku = new Map<string, string>();
+      for (const v of bulkVideos) {
+        const sku = (v.sku || "").trim();
+        if (!sku || !v.filename) continue;
+        const key = `${safeKeyPart(sku)}/video/${safeKeyPart(v.filename)}`;
+        videoPathBySku.set(sku, key);
+      }
+
+      // 5) Upsert products, then images
+      for (let i = 0; i < bulkProducts.length; i++) {
+        const p = bulkProducts[i];
+        const label = p.slug || p.sku || p.name || `(row#${i + 2})`;
+
+        const category_id = p.category_slug
+          ? catMap.get(p.category_slug)
+          : undefined;
+        const brand_id = p.brand_slug ? brMap.get(p.brand_slug) : undefined;
+        if (!category_id) {
+          issues.push(`'${label}': category '${p.category_slug}' not found`);
+          continue;
+        }
+        if (!brand_id) {
+          issues.push(`'${label}': brand '${p.brand_slug}' not found`);
+          continue;
+        }
+
+        const skuKey = (p.sku || "").trim();
+        const heroOg = heroOgBySku.get(skuKey) || {};
+
+        // Build product payload (vendor-facing fields only)
+        // build core payload first
+        const payload: any = {
+          // identity/relations
+          sku: p.sku,
+          slug: p.slug,
+          name: p.name,
+          brand_id,
+          category_id,
+
+          // copy
+          short_description: p.short_description,
+          description: p.description,
+
+          // pricing & publish
+          price: p.price,
+          currency: p.currency,
+          compare_at_price: p.compare_at_price,
+          sale_price: p.sale_price,
+          sale_starts_at: p.sale_starts_at,
+          sale_ends_at: p.sale_ends_at,
+          is_published: p.is_published,
+
+          // badges
+          made_in_korea: p.made_in_korea,
+          is_vegetarian: p.is_vegetarian,
+          cruelty_free: p.cruelty_free,
+          toxin_free: p.toxin_free,
+          paraben_free: p.paraben_free,
+
+          // SEO / rich
+          meta_title: p.meta_title,
+          meta_description: p.meta_description,
+          ingredients_md: p.ingredients_md,
+          key_features_md: p.key_features_md,
+          additional_details_md: p.additional_details_md,
+          attributes: safeJSON(p.attributes_json) ?? {}, // ← never null (DB is jsonb NOT NULL)
+          faq: p.faq,
+          key_benefits: p.key_benefits,
+
+          // misc
+          volume_ml: p.volume_ml,
+          net_weight_g: p.net_weight_g,
+          country_of_origin: p.country_of_origin,
+        };
+
+        // only touch media if this run supplied them
+        const imgsForSku = mediaBySku.get(skuKey);
+        if (imgsForSku && imgsForSku.length) {
+          payload.hero_image_path = heroOg.hero ?? null;
+          payload.og_image_path = heroOg.og ?? null;
+        }
+        const video_path = videoPathBySku.get(skuKey);
+        if (video_path) {
+          payload.video_path = video_path;
+        }
+
+        // Upsert product by slug
+        const { data: prodRow, error: upErr } = await supabase
+          .from("products")
+          .upsert(payload, { onConflict: "slug" })
+          .select("id")
+          .single();
+
+        if (upErr || !prodRow?.id) {
+          issues.push(
+            `Upsert failed '${label}': ${upErr?.message ?? "no id returned"}`
+          );
+          continue;
+        }
+
+        const product_id = prodRow.id as string;
+
+        // Replace images if requested
+        if (bulkReplaceImages) {
+          const { error: delErr } = await supabase
+            .from("product_images")
+            .delete()
+            .eq("product_id", product_id);
+          if (delErr)
+            issues.push(`Image cleanup failed '${label}': ${delErr.message}`);
+        }
+
+        // Gather gallery images for this product (sorted)
+        const imgs = (mediaBySku.get(skuKey) || [])
+          .slice()
+          .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+          .map((m) => ({
+            product_id,
+            storage_path: `${safeKeyPart(skuKey)}/${safeKeyPart(m.filename)}`,
+            alt: m.alt ?? null,
+            sort_order: m.sort_order ?? 0,
+          }));
+
+        if (imgs.length) {
+          // Use UPSERT so we don't create duplicates (requires unique index on (product_id, storage_path))
+          const { error: imgErr } = await supabase
+            .from("product_images")
+            .upsert(imgs, { onConflict: "product_id,storage_path" });
+          if (imgErr)
+            issues.push(`Upsert images failed '${label}': ${imgErr.message}`);
+        }
+
+        if (i % 5 === 0) {
+          setBulkProgress(
+            80 + Math.round(((i + 1) / Math.max(1, bulkProducts.length)) * 20)
+          ); // 80 → 100%
+        }
+      }
+    } catch (e: any) {
+      issues.push(`Unexpected error: ${e?.message || String(e)}`);
+    }
+
     setBulkIssues(issues);
-    return { ok: false, issues };
+    setBulkProgress(100);
+    return { ok: issues.length === 0, issues };
   }
 
-  // 2) Preload dictionaries
-  const [[catRes, brRes]] = await Promise.all([
-    Promise.all([
-      supabase.from("categories").select("id,slug"),
-      supabase.from("brands").select("id,slug"),
-    ]),
-  ]);
-  const catMap = new Map<string, string>((catRes.data ?? []).map((c: any) => [c.slug, c.id]));
-  const brMap  = new Map<string, string>((brRes.data ?? []).map((b: any) => [b.slug, b.id]));
-
-  // 3) Group media by SKU
-  const mediaBySku = new Map<string, BulkMediaRow[]>();
-  for (const m of bulkMedia) {
-    const sku = m.sku?.trim();
-    const filename = m.filename?.trim();
-    if (!sku || !filename) continue;
-    const arr = mediaBySku.get(sku) ?? [];
-    arr.push({ ...m, sort_order: m.sort_order == null ? null : Number(m.sort_order) });
-    mediaBySku.set(sku, arr);
-  }
-
-  // 4) Upsert each product with vendor_id
-  for (let i = 0; i < bulkProducts.length; i++) {
-    const p = bulkProducts[i];
-    const label = p.slug || p.sku || `row#${i + 2}`;
-
-    const category_id = p.category_slug ? catMap.get(p.category_slug) : undefined;
-    const brand_id    = p.brand_slug ? brMap.get(p.brand_slug) : undefined;
-    if (!category_id) { issues.push(`Upsert skipped '${label}': category '${p.category_slug}' not found`); continue; }
-    if (!brand_id)    { issues.push(`Upsert skipped '${label}': brand '${p.brand_slug}' not found`); continue; }
-
-    // If a product with this slug exists and belongs to another vendor, skip
-    const { data: existing, error: exErr } = await supabase
-      .from("products")
-      .select("id,vendor_id")
-      .eq("slug", p.slug)
-      .maybeSingle();
-
-    if (exErr) {
-      issues.push(`Lookup failed for '${label}': ${exErr.message}`);
-      continue;
+  /* ── Orchestration ── */
+  async function bulkRunAll() {
+    if (!excelFile) {
+      setBulkIssues(["Please select an Excel file first."]);
+      return;
     }
-    if (existing && existing.vendor_id && existing.vendor_id !== myVendor.id) {
-      issues.push(`Slug '${p.slug}' already belongs to another vendor. Skipping.`);
-      continue;
-    }
-
-  const safeSku  = safeKeyPart(p.sku || '');
-  const heroPath = p.hero_image_filename
-    ? `${safeSku}/${safeKeyPart(p.hero_image_filename)}`
-    : null;
-  const ogPath   = p.og_image_filename
-    ? `${safeSku}/${safeKeyPart(p.og_image_filename)}`
-    : null;
-
-    const payload = {
-      // core
-      sku: p.sku || null,
-      slug: p.slug,
-      name: p.name,
-      short_description: p.short_description || null,
-      description: p.description || null,
-      brand_id,
-      price: toNumOrNull(p.price),
-      currency: p.currency || null,
-      country_of_origin: p.country_of_origin || null,
-      volume_ml: toNumOrNull(p.volume_ml),
-      net_weight_g: toNumOrNull(p.net_weight_g),
-      attributes: safeJSON(p.attributes_json),
-      category_id,
-      is_published: parseBool(p.is_published),
-      hero_image_path: heroPath,
-
-      // ✅ ensure ownership
-      vendor_id: myVendor.id,
-
-      // rich text & JSON
-      ingredients_md: p.ingredients_md || null,
-      key_features_md: p.key_features_md || null,
-      additional_details_md: p.additional_details_md || null,
-      faq: p.faq ?? [],
-      key_benefits: p.key_benefits ?? [],
-
-      // badges
-      made_in_korea: parseBool(p.made_in_korea),
-      is_vegetarian: parseBool(p.is_vegetarian),
-      cruelty_free: parseBool(p.cruelty_free),
-      toxin_free: parseBool(p.toxin_free),
-      paraben_free: parseBool(p.paraben_free),
-
-      // pricing / merch
-      compare_at_price: toNumOrNull(p.compare_at_price),
-      sale_price: toNumOrNull(p.sale_price),
-      sale_starts_at: toISODate(p.sale_starts_at),
-      sale_ends_at: toISODate(p.sale_ends_at),
-      is_featured: parseBool(p.is_featured),
-      featured_rank: p.featured_rank == null ? null : toInt(p.featured_rank),
-      is_trending: parseBool(p.is_trending),
-      new_until: toISODate(p.new_until),
-      meta_title: p.meta_title || null,
-      meta_description: p.meta_description || null,
-      og_image_path: ogPath,
-    };
-
-    const { data: prodRow, error: upErr } = await supabase
-      .from("products")
-      .upsert(payload, { onConflict: "slug" })
-      .select("id")
-      .single();
-
-      // Optional cleanup
-  if (bulkReplaceImages) {
-    await supabase.from("product_images").delete().eq("product_id", prodRow.id);
-  }
-
-    if (upErr || !prodRow?.id) {
-      issues.push(`Upsert failed '${label}': ${upErr?.message ?? "no id returned"}`);
-      continue;
-    }
-
-    const product_id = prodRow.id as string;
-
-    // Optional: clean & insert product_images
-    if (bulkReplaceImages) {
-      const { error: delErr } = await supabase.from("product_images").delete().eq("product_id", product_id);
-      if (delErr) issues.push(`Images cleanup failed '${label}': ${delErr.message}`);
-    }
-    const mediaRows = (mediaBySku.get(p.sku) || []).slice().sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-    if (mediaRows.length) {
-      const rowsToInsert = mediaRows.map((m) => ({
-        product_id,
-        storage_path: `${safeSku}/${safeKeyPart(m.filename)}`,
-        alt: m.alt ?? null,
-        sort_order: m.sort_order ?? 0,
-      }));
-      const { error: insErr } = await supabase.from("product_images").insert(rowsToInsert);
-      if (insErr) issues.push(`Insert images failed '${label}': ${insErr.message}`);
-    } else {
-      issues.push(`No media rows to insert for '${label}'`);
-    }
-
-    if (i % 5 === 0) {
-      setBulkProgress(Math.round(((i + 1) / Math.max(1, bulkProducts.length)) * 100));
-    }
-  }
-
-  setBulkProgress(100);
-  setBulkIssues(issues);
-  return { ok: issues.length === 0, issues };
-};
-
-
-  /* ------------------------------- Run all --------------------------------- */
-  const bulkRunAll = async () => {
-    setBulkBusy(true);
+    setBusy(true);
+    setBulkIssues([]);
+    setBulkProgress(0);
     try {
       const ok = await bulkValidateAll();
-      if (!ok) return;
-      await bulkUploadImages();
+      if (!ok) {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+      }
+      await bulkUploadAssets();
       await bulkUpsertAll();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (e: any) {
+      setBulkIssues((prev) => [...prev, e?.message || "Unexpected error"]);
     } finally {
-      setBulkBusy(false);
+      setBusy(false);
     }
-  };
+  }
 
-  /* ------------------------------- UI (bulk only) --------------------------------- */
+  /* ── UI (Tailwind-styled) ── */
   return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>Bulk Upload — Template</CardTitle>
-          <CardDescription>
-            Download Excel template (includes your categories/brands lookup).
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <Button type="button" onClick={bulkDownloadTemplate}>
-            <Download className="mr-2 h-4 w-4" /> Download Excel Template
-          </Button>
-          {bulkProgressMsg && (
-            <div className="text-sm text-muted-foreground">
-              {bulkProgressMsg}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Upload Excel</CardTitle>
-          <CardDescription>
-            Choose the filled template. We'll parse Products & Media.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <input
-            type="file"
-            accept=".xlsx,.xls"
-            className="hidden"
-            onChange={(e) => bulkOnExcelChosen(e.target.files?.[0] || null)}
-          />
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() =>
-              document
-                .querySelector<HTMLInputElement>(
-                  'input[type=file][accept=".xlsx,.xls"]'
-                )
-                ?.click()
-            }
+    <div className="mx-auto max-w-6xl p-6">
+      {/* Header */}
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Bulk Upload — Products
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Single sheet. Up to <span className="font-medium">5 images</span>{" "}
+            and <span className="font-medium">1 video</span> per product (all
+            optional).
+          </p>
+        </div>
+        <div className="hidden sm:flex gap-2">
+          <button
+            onClick={bulkDownloadTemplate}
+            disabled={busy}
+            className="inline-flex items-center rounded-lg bg-primary px-4 py-2 text-white shadow hover:opacity-90 disabled:opacity-50"
           >
-            <FileSpreadsheet className="mr-2 h-4 w-4" /> Choose Excel
-          </Button>
-          {bulkExcelFile && (
-            <div className="text-sm text-muted-foreground">
-              Selected: {bulkExcelFile.name}
-            </div>
-          )}
-          <Separator />
-          <div className="grid gap-2 text-sm">
-            <div>
-              <strong>Products:</strong> {bulkProducts.length}
-            </div>
-            <div>
-              <strong>Media rows:</strong> {bulkMedia.length}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+            Download Template
+          </button>
+        </div>
+      </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Select Images</CardTitle>
-          <CardDescription>
-            Pick images referenced in Excel. Stored as{" "}
-            <code>product-media/sku/filename</code>.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <input
-            type="file"
-            multiple
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => bulkOnMediaChosen(e.target.files)}
-          />
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() =>
-              document
-                .querySelectorAll("input[type=file][multiple]")[0]
-                ?.click()
-            }
-          >
-            <ImageIcon className="mr-2 h-4 w-4" /> Choose Images
-          </Button>
-          <div className="flex items-center gap-2">
-            <input
-              id="bulk-upsert"
-              type="checkbox"
-              className="h-4 w-4"
-              checked={bulkOverwriteImages}
-              onChange={(e) => setBulkOverwriteImages(e.target.checked)}
-            />
-            <Label htmlFor="bulk-upsert" className="text-sm">
-              Overwrite existing files (upsert)
-            </Label>
+      {/* Grid */}
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+        {/* Excel */}
+        <section className="rounded-xl border bg-card shadow-sm">
+          <div className="border-b p-4">
+            <h2 className="text-lg font-medium">1) Upload Excel</h2>
+            <p className="text-xs text-muted-foreground">
+              Sheet name: <code>Products</code>
+            </p>
           </div>
-          {bulkMediaFiles.length > 0 && (
-            <div className="rounded border p-3 text-sm">
-              <div className="mb-2 font-medium">
-                Selected files ({bulkMediaFiles.length}):
-              </div>
-              <div className="max-h-48 overflow-auto font-mono text-xs leading-6">
-                {bulkMediaFiles.map((f, i) => (
-                  <div key={i}>{f.name}</div>
-                ))}
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Validate & Import</CardTitle>
-          <CardDescription>
-            Validate data, upload images, and upsert DB.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-2">
+          <div className="p-4 space-y-3">
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium">
+                Excel file (.xlsx)
+              </span>
               <input
-                id="bulk-replace"
-                type="checkbox"
-                className="h-4 w-4"
-                checked={bulkReplaceImages}
-                onChange={(e) => setBulkReplaceImages(e.target.checked)}
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) {
+                    setExcelFile(f);
+                    bulkOnExcelChosen(f);
+                  }
+                }}
+                disabled={busy}
+                className="block w-full cursor-pointer rounded-lg border bg-background px-3 py-2 text-sm file:mr-4 file:rounded-md file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:opacity-90"
               />
-              <Label htmlFor="bulk-replace" className="text-sm">
+            </label>
+
+            <div className="text-xs text-muted-foreground">
+              Parsed: <span className="font-medium">{bulkProducts.length}</span>{" "}
+              products,&nbsp;
+              <span className="font-medium">{bulkMedia.length}</span>{" "}
+              images,&nbsp;
+              <span className="font-medium">{bulkVideos.length}</span> videos
+            </div>
+
+            <button
+              onClick={bulkDownloadTemplate}
+              disabled={busy}
+              className="inline-flex items-center rounded-md border px-3 py-2 text-sm hover:bg-muted/50 md:hidden"
+            >
+              Download Template
+            </button>
+          </div>
+        </section>
+
+        {/* Media */}
+        <section className="rounded-xl border bg-card shadow-sm">
+          <div className="border-b p-4">
+            <h2 className="text-lg font-medium">2) Select Media Files</h2>
+            <p className="text-xs text-muted-foreground">
+              Images ≤ {IMAGE_MAX_MB}MB each, Video ≤ {VIDEO_MAX_MB}MB
+            </p>
+          </div>
+          <div className="p-4 space-y-4">
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium">
+                Images &amp; Video
+              </span>
+              <input
+                type="file"
+                multiple
+                accept="image/*,video/mp4,video/webm"
+                onChange={(e) =>
+                  e.target.files && bulkOnMediaChosen(e.target.files)
+                }
+                disabled={busy}
+                className="block w-full cursor-pointer rounded-lg border bg-background px-3 py-2 text-sm file:mr-4 file:rounded-md file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:opacity-90"
+              />
+            </label>
+
+            <div className="rounded-md border bg-muted/40 p-3 text-xs">
+              <div className="mb-1 font-medium">Selected files</div>
+              <div className="text-muted-foreground">
+                {bulkChosenFiles.length ? (
+                  <span>{bulkChosenFiles.length} file(s) selected.</span>
+                ) : (
+                  <span>None selected yet.</span>
+                )}
+              </div>
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4"
+                  checked={bulkOverwriteImages}
+                  onChange={(e) => setBulkOverwriteImages(e.target.checked)}
+                  disabled={busy}
+                />
+                Overwrite same filenames in storage
+              </label>
+              <label className="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4"
+                  checked={bulkReplaceImages}
+                  onChange={(e) => setBulkReplaceImages(e.target.checked)}
+                  disabled={busy}
+                />
                 Replace existing product images
-              </Label>
+              </label>
             </div>
           </div>
+        </section>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <Button
-              type="button"
-              onClick={bulkRunAll}
-              disabled={bulkBusy || !bulkProducts.length}
-            >
-              Start Import (Validate → Upload → Upsert)
-            </Button>
-
-            <details className="ml-2">
-              <summary className="cursor-pointer text-sm text-muted-foreground">
-                Advanced actions
-              </summary>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  onClick={bulkValidateAll}
-                  disabled={bulkBusy}
-                >
-                  <AlertTriangle className="mr-2 h-4 w-4" /> Run validation
-                </Button>
-                <Button
-                  type="button"
-                  onClick={bulkUploadImages}
-                  disabled={bulkBusy || !bulkValidated}
-                >
-                  <Upload className="mr-2 h-4 w-4" /> Upload images
-                </Button>
-                <Button
-                  type="button"
-                  onClick={bulkUpsertAll}
-                  disabled={bulkBusy || !bulkValidated}
-                >
-                  <Upload className="mr-2 h-4 w-4" /> Upsert DB
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={resetBulkSession}
-                >
-                  Reset bulk session
-                </Button>
-              </div>
-            </details>
+        {/* Validate & Import */}
+        <section className="md:col-span-2 rounded-xl border bg-card shadow-sm">
+          <div className="border-b p-4">
+            <h2 className="text-lg font-medium">3) Validate &amp; Import</h2>
+            <p className="text-xs text-muted-foreground">
+              Validate first, then Upload, then Upsert. Or use “Run All”.
+            </p>
           </div>
+          <div className="p-4 space-y-4">
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={bulkValidateAll}
+                disabled={busy}
+                className="inline-flex items-center rounded-lg bg-secondary px-4 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-50"
+              >
+                Validate
+              </button>
+              <button
+                onClick={bulkUploadAssets}
+                disabled={busy || !bulkValidated}
+                className="inline-flex items-center rounded-lg bg-secondary px-4 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-50"
+              >
+                Upload Files
+              </button>
+              <button
+                onClick={bulkUpsertAll}
+                disabled={busy || !bulkValidated}
+                className="inline-flex items-center rounded-lg bg-secondary px-4 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-50"
+              >
+                Upsert to DB
+              </button>
+              <button
+                onClick={bulkRunAll}
+                disabled={busy}
+                className="inline-flex items-center rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white shadow hover:opacity-90 disabled:opacity-50"
+              >
+                Run All
+              </button>
+            </div>
 
-          {(bulkProgressMsg || bulkProgress > 0) && (
-            <div className="space-y-2">
-              <div className="text-sm text-muted-foreground">
-                {bulkProgressMsg}
-              </div>
-              <div className="h-2 w-full bg-gray-200 rounded">
+            {/* Progress */}
+            <div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
                 <div
-                  className="h-2 bg-blue-600 rounded"
+                  className="h-full bg-primary transition-all"
                   style={{ width: `${bulkProgress}%` }}
                 />
               </div>
-            </div>
-          )}
-
-          {bulkIssues.length > 0 ? (
-            <div className="rounded border p-3">
-              <div className="mb-2 text-sm font-medium text-red-600">
-                Issues ({bulkIssues.length}):
+              <div className="mt-1 text-xs text-muted-foreground">
+                Progress: {bulkProgress}%
               </div>
-              <ul className="list-disc pl-5 text-sm">
-                {bulkIssues.map((s, i) => (
-                  <li key={i}>{s}</li>
-                ))}
-              </ul>
             </div>
-          ) : (
-            <div className="text-sm text-green-700 flex items-center gap-2">
-              <CheckCircle2 className="h-4 w-4" /> No issues found
-            </div>
-          )}
-        </CardContent>
-      </Card>
 
-      {/* Preview table */}
-      {bulkProducts.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Preview ({bulkProducts.length})</CardTitle>
-            <CardDescription>Quick glance before importing.</CardDescription>
-          </CardHeader>
-          <CardContent className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-left">
-                <tr className="border-b">
-                  <th className="py-2 pr-4">SKU</th>
-                  <th className="py-2 pr-4">Slug</th>
-                  <th className="py-2 pr-4">Name</th>
-                  <th className="py-2 pr-4">Brand</th>
-                  <th className="py-2 pr-4">Category</th>
-                  <th className="py-2 pr-4">Price</th>
-                  <th className="py-2 pr-4">Korea</th>
-                  <th className="py-2 pr-4">Veg</th>
-                  <th className="py-2 pr-4">Cruelty</th>
-                  <th className="py-2 pr-4">Toxin</th>
-                  <th className="py-2 pr-4">Paraben</th>
-                  <th className="py-2 pr-4">Benefits</th>
-                  <th className="py-2 pr-4">FAQ</th>
-                </tr>
-              </thead>
-              <tbody>
-                {bulkProducts.map((p, i) => (
-                  <tr key={i} className="border-b last:border-0">
-                    <td className="py-2 pr-4">{p.sku}</td>
-                    <td className="py-2 pr-4">{p.slug}</td>
-                    <td className="py-2 pr-4">{p.name}</td>
-                    <td className="py-2 pr-4">{p.brand_slug}</td>
-                    <td className="py-2 pr-4">{p.category_slug}</td>
-                    <td className="py-2 pr-4">{p.price ?? ""}</td>
-                    <td className="py-2 pr-4">{p.made_in_korea ? "✓" : ""}</td>
-                    <td className="py-2 pr-4">{p.is_vegetarian ? "✓" : ""}</td>
-                    <td className="py-2 pr-4">{p.cruelty_free ? "✓" : ""}</td>
-                    <td className="py-2 pr-4">{p.toxin_free ? "✓" : ""}</td>
-                    <td className="py-2 pr-4">{p.paraben_free ? "✓" : ""}</td>
-                    <td className="py-2 pr-4">{p.key_benefits?.length ?? 0}</td>
-                    <td className="py-2 pr-4">{p.faq?.length ?? 0}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
-      )}
+            {/* Issues */}
+            {bulkIssues.length > 0 && (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+                <div className="mb-2 text-sm font-medium text-destructive">
+                  Issues ({bulkIssues.length})
+                </div>
+                <ul className="list-disc space-y-1 pl-5 text-sm">
+                  {bulkIssues.map((s, i) => (
+                    <li key={i} className="text-destructive">
+                      {s}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
     </div>
   );
 }

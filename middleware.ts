@@ -1,13 +1,13 @@
-import { type NextRequest } from 'next/server'
-import { updateSession } from '@/utils/supabase/middleware'
+// middleware.ts
+import { NextResponse } from "next/server";
+import { createMiddlewareClient } from "@supabase/auth-helpers-nextjs";
+import type { NextRequest } from "next/server";
 
-export async function middleware(request: NextRequest) {
-  return updateSession(request)
+export async function middleware(req: NextRequest) {
+  const res = NextResponse.next();
+  const supabase = createMiddlewareClient({ req, res });
+  await supabase.auth.getSession(); // refreshes/sets sb-* cookies
+  return res;
 }
 
-// exclude static assets; adjust to your routes
-export const config = {
-  matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'
-  ]
-}
+export const config = { matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"] };

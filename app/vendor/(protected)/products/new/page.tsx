@@ -1,83 +1,16 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { createClient } from "@supabase/supabase-js";
 import { useAuth } from "@/lib/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { LogOut } from "lucide-react";
 import { toast } from "sonner";
 import { ProductForm } from "@/components/admin/ProductForm";
 import { v4 as uuidv4 } from "uuid";
-import { useEffect, useState } from "react";
-
-// minimal inline supabase client for auth/vendor check only
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-  { auth: { persistSession: true, autoRefreshToken: true } }
-);
-
-// get_my_vendor RETURNS TABLE → normalize to a single row
-function coerceVendor(data: any) {
-  const arr = Array.isArray(data) ? data : data ? [data] : [];
-  return arr[0] ?? null;
-}
 
 export default function NewProductPage() {
   const router = useRouter();
   const { user, logout } = useAuth();
-
-  // ✅ auth-only addition (no UI changes)
-  const [gateOk, setGateOk] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      // wait for session hydration
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      if (!session?.user) {
-        router.replace("/vendor/login?redirect=/vendor/products/new");
-        return;
-      }
-
-      // fetch vendor row for this user
-      const { data, error } = await supabase.rpc("get_my_vendor");
-      if (cancelled) return;
-
-      if (error) {
-        console.error("get_my_vendor error", error);
-        router.replace("/vendor"); // gate page handles state messaging
-        return;
-      }
-
-      const v = coerceVendor(data);
-      if (!v) {
-        router.replace("/vendor/register");
-        return;
-      }
-      if (v.status !== "approved") {
-        router.replace("/vendor");
-        return;
-      }
-
-      // approved vendor → allow page
-      setGateOk(true);
-    })();
-
-    const { data: sub } = supabase.auth.onAuthStateChange(() => {
-      // re-hydrate if auth changes; next render will re-run effect
-      setGateOk(false);
-    });
-
-    return () => {
-      cancelled = true;
-      sub.subscription.unsubscribe();
-    };
-  }, [router]);
-
-  if (!gateOk) return null; // keep page blank while gating (no UI change)
 
   const handleLogout = async () => {
     await logout();
@@ -86,7 +19,7 @@ export default function NewProductPage() {
   };
 
   const handleSave = (productData: any) => {
-    // unchanged: local demo persistence then redirect
+    // local demo persistence then redirect (unchanged)
     const newProduct = {
       id: uuidv4(),
       ...productData,
@@ -111,10 +44,7 @@ export default function NewProductPage() {
       <header className="border-b bg-background">
         <div className="container mx-auto py-4 flex justify-between items-center">
           <div className="flex items-center gap-4">
-            <Button
-              variant="ghost"
-              onClick={() => router.push("/vendor/products")}
-            >
+            <Button variant="ghost" onClick={() => router.push("/vendor/products")}>
               ← Back
             </Button>
             <h1 className="text-2xl font-bold">Add New Product</h1>

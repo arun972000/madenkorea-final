@@ -1,3 +1,4 @@
+// Header.tsx
 "use client";
 
 import Link from "next/link";
@@ -64,8 +65,6 @@ export function Header() {
     (async () => {
       setLoadingDicts(true);
 
-      // products.category_id -> categories.id
-      // products.brand_id    -> brands.id
       const [{ data: cats, error: cErr }, { data: brs, error: bErr }] =
         await Promise.all([
           supabase
@@ -167,6 +166,14 @@ export function Header() {
                   </Link>
                 </div>
                 <Separator />
+
+                {/* 👉 Mobile CTA */}
+                <div className="px-5 py-3">
+                  <Button asChild className="w-full">
+                    <Link href="/influencer-request">Become a Partner</Link>
+                  </Button>
+                </div>
+
                 <ScrollArea className="h-[calc(100dvh-5rem)] px-2 py-4">
                   <nav className="px-3">
                     <Accordion type="multiple" className="w-full">
@@ -214,15 +221,6 @@ export function Header() {
                         </AccordionTrigger>
                         <AccordionContent>
                           <ul className="space-y-1">
-                            {/* <li>
-                              <Link
-                                href={"/brands"}
-                                className="flex items-center justify-between rounded-lg px-3 py-2 text-sm hover:bg-accent"
-                              >
-                                <span>All Brands</span>
-                                <ChevronRight className="h-4 w-4 opacity-60" />
-                              </Link>
-                            </li> */}
                             {sortedBrands.map((b) => {
                               const disabled = (b.product_count ?? 0) === 0;
                               return (
@@ -254,8 +252,11 @@ export function Header() {
                       </AccordionItem>
                     </Accordion>
 
-                    <div className="mt-4"><Link href='/services' className="text-base ">Services</Link></div>
-
+                    <div className="mt-4">
+                      <Link href="/services" className="text-base">
+                        Services
+                      </Link>
+                    </div>
                   </nav>
                 </ScrollArea>
               </SheetContent>
@@ -263,7 +264,6 @@ export function Header() {
 
             {/* Logo (desktop) */}
             <Link href="/" className="flex items-center">
-           
               <Image
                 src="/logo gif.gif"
                 alt="Made Korea"
@@ -276,6 +276,7 @@ export function Header() {
 
             {/* Desktop nav with dynamic dropdowns */}
             <nav className="hidden md:block">
+              {/* Removed plain text link; we render a proper button on the right cluster */}
               <NavigationMenu>
                 <NavigationMenuList>
                   {/* Categories (desktop) */}
@@ -326,16 +327,6 @@ export function Header() {
                     </NavigationMenuTrigger>
                     <NavigationMenuContent>
                       <div className="grid w-[720px] max-w-[90vw] grid-cols-2 gap-2 p-4 md:grid-cols-3 lg:grid-cols-4">
-                        {/* <Link
-                          href={"/brands"}
-                          className="rounded-lg p-3 text-sm hover:bg-accent"
-                        >
-                          <div className="font-medium">All Brands</div>
-                          <div className="text-xs text-muted-foreground">
-                            Explore All
-                          </div>
-                        </Link> */}
-
                         {topBrands.map((b) => {
                           const disabled = (b.product_count ?? 0) === 0;
                           const base = "rounded-lg p-3 text-sm";
@@ -369,19 +360,25 @@ export function Header() {
                       </div>
                     </NavigationMenuContent>
                   </NavigationMenuItem>
+
                   <NavigationMenuList className="text-sm">
-                    <Link href='/services'>Services</Link>
-                  </NavigationMenuList> 
+                    <Link href="/services">Services</Link>
+                  </NavigationMenuList>
                 </NavigationMenuList>
               </NavigationMenu>
             </nav>
           </div>
 
-          {/* Right cluster: search + account/wishlist/cart */}
+          {/* Right cluster: search + CTA + account/wishlist/cart */}
           <div className="flex items-center gap-1 sm:gap-2">
             <div className="hidden lg:block w-[360px]">
               <SearchAutocomplete />
             </div>
+
+            {/* Desktop CTA — match standard order button style */}
+            <Button asChild className="hidden md:inline-flex">
+              <Link href="/influencer-request">Become a Partner</Link>
+            </Button>
 
             <Button
               variant="ghost"

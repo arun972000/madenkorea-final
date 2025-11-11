@@ -7,18 +7,14 @@ import { createClient } from "@supabase/supabase-js";
 import { CustomerLayout } from "@/components/CustomerLayout";
 import { Button } from "@/components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
+  Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Eye, EyeOff } from "lucide-react";
 
+// Single browser client (persists session in localStorage)
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -35,12 +31,10 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [form, setForm] = useState({ email: "", password: "" });
 
-  // If already logged in, redirect away
+  // If already logged in, go where they intended
   useEffect(() => {
     (async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) router.replace(redirect);
       setLoading(false);
     })();
@@ -48,6 +42,21 @@ export default function LoginPage() {
 
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [e.target.name]: e.target.value }));
+
+  // Attach browser session to server cookies so /api routes & RSC see auth
+  const attachAfterAuth = async () => {
+    const { data: s } = await supabase.auth.getSession();
+    const at = s?.session?.access_token;
+    const rt = s?.session?.refresh_token;
+    if (!at || !rt) return;
+    // sets sb-* cookies on the response
+    await fetch("/api/auth/attach", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ access_token: at, refresh_token: rt }),
+    }).catch(() => {});
+  };
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,18 +69,19 @@ export default function LoginPage() {
     }
 
     setSubmitting(true);
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    setSubmitting(false);
-
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
-      // Common Supabase messages are already friendly; surface verbatim
+      setSubmitting(false);
       toast.error(error.message || "Sign in failed");
       return;
     }
 
+    // If a session was returned, set SSR cookies so server can see auth immediately
+    if (data.session) {
+      await attachAfterAuth();
+    }
+
+    setSubmitting(false);
     toast.success("Signed in");
     router.replace(redirect);
   };
@@ -83,7 +93,6 @@ export default function LoginPage() {
       return;
     }
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      // You can handle the reset flow at /auth/reset (create that page later)
       redirectTo: `${window.location.origin}/auth/reset`,
     });
     if (error) {
@@ -98,12 +107,8 @@ export default function LoginPage() {
       <CustomerLayout>
         <div className="container mx-auto py-16">
           <Card className="max-w-md mx-auto">
-            <CardHeader>
-              <CardTitle>Sign in</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground">Loading…</p>
-            </CardContent>
+            <CardHeader><CardTitle>Sign in</CardTitle></CardHeader>
+            <CardContent><p className="text-muted-foreground">Loading…</p></CardContent>
           </Card>
         </div>
       </CustomerLayout>
@@ -153,7 +158,6 @@ export default function LoginPage() {
                     onClick={() => setShowPassword((s) => !s)}
                     onMouseDown={() => {
                       setShowPassword(true);
-                      // auto-hide after 2s if still pressed
                       (window as any).__peek = window.setTimeout(
                         () => setShowPassword(false),
                         2000
@@ -161,31 +165,21 @@ export default function LoginPage() {
                     }}
                     onMouseUp={() => {
                       setShowPassword(false);
-                      if ((window as any).__peek)
-                        window.clearTimeout((window as any).__peek);
+                      if ((window as any).__peek) window.clearTimeout((window as any).__peek);
                     }}
                     onMouseLeave={() => setShowPassword(false)}
                     onTouchStart={() => setShowPassword(true)}
                     onTouchEnd={() => setShowPassword(false)}
-                    aria-label={
-                      showPassword ? "Hide password" : "Show password"
-                    }
+                    aria-label={showPassword ? "Hide password" : "Show password"}
                     title="Click to toggle • Hold to peek"
                   >
-                    {showPassword ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </Button>
                 </div>
                 <div className="text-right">
-                  <Link
-                    href="/auth/forgot"
-                    className="text-sm text-primary hover:underline"
-                  >
+                  <button type="button" className="text-sm text-primary hover:underline" onClick={sendReset}>
                     Forgot password?
-                  </Link>
+                  </button>
                 </div>
               </div>
             </CardContent>
@@ -198,9 +192,7 @@ export default function LoginPage() {
               <p className="text-sm text-center text-muted-foreground">
                 New here?{" "}
                 <Link
-                  href={`/auth/register?redirect=${encodeURIComponent(
-                    redirect
-                  )}`}
+                  href={`/auth/register?redirect=${encodeURIComponent(redirect)}`}
                   className="text-primary hover:underline"
                 >
                   Create an account
