@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import Image from "next/image";
 import { Trash2, ShoppingBag, Tag, Check, X } from "lucide-react";
 import { CustomerLayout } from "@/components/CustomerLayout";
 import { Button } from "@/components/ui/button";
@@ -37,7 +36,7 @@ type ProductRow = {
 
 type CartLine = { product_id: string; qty: number };
 
-// NEW: totals response shape from the global-promo calc endpoint
+// totals response
 type TotalsResponse = null | {
   ok: true;
   currency: string;
@@ -45,7 +44,7 @@ type TotalsResponse = null | {
   shipping_fee: number;
   discount_total: number;
   total: number;
-  commission_total: number; // informational for attribution
+  commission_total: number;
   applied: null | {
     type: "promo";
     code: string;
@@ -167,9 +166,8 @@ export default function CartPage() {
 
         if (!p) return null;
 
-        const unit =
-         effectiveUnitPrice(p);
-       const line = unit * it.quantity;
+        const unit = effectiveUnitPrice(p);
+        const line = unit * it.quantity;
         const mrp =
           p.compare_at_price && p.compare_at_price > unit
             ? p.compare_at_price
@@ -326,10 +324,7 @@ export default function CartPage() {
   const displayTotal =
     totals?.total ?? Math.max(0, baseSubtotal + shippingFee - displayDiscount);
 
-  // NEW: detect if an active promo affected any line
   const promoActive = totals?.applied?.type === "promo";
-  const promoAffectedAny =
-    promoActive && totals?.lines?.some((l) => l.promo_applied) ? true : false;
 
   return (
     <CustomerLayout>
@@ -343,34 +338,13 @@ export default function CartPage() {
           <div className="lg:col-span-2 space-y-4">
             {rows.map((row) => {
               const p = row.product;
-              const img =
-                p.hero_image_url ||
-                storagePublicUrl(p.hero_image_path) ||
-                "/placeholder.png";
-
-              // NEW: per-line promo details from totals.lines
-              const calcLine = totals?.lines?.find(
-                (l) => l.product_id === row.productId
-              );
-              const promoApplied = !!calcLine?.promo_applied;
-              const effectiveUser = calcLine?.effective_user_discount_pct ?? 0;
-              const effectiveComm = calcLine?.effective_commission_pct ?? 0;
-              const lineDiscount = calcLine?.line_discount ?? 0;
 
               return (
                 <Card key={row.id}>
                   <CardContent className="p-6">
-                    <div className="flex gap-4">
-                      <div className="relative w-24 h-24 flex-shrink-0 bg-muted rounded-lg overflow-hidden">
-                        <Image
-                          src={img}
-                          alt={p.name}
-                          fill
-                          className="object-cover"
-                        />
-                      </div>
-
-                      <div className="flex-1 min-w-0">
+                    {/* Thumbnail removed; compact two-column layout */}
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0 flex-1">
                         <Link
                           href={`/p/${p.slug}`}
                           className="hover:text-primary"
@@ -384,7 +358,7 @@ export default function CartPage() {
                             {p.brands.name}
                           </p>
                         )}
-                        <div className="flex items-baseline gap-2 mb-1">
+                        <div className="flex items-baseline gap-2">
                           <span className="font-bold">
                             {formatINR(row.unitPrice, p.currency)}
                           </span>
@@ -394,26 +368,10 @@ export default function CartPage() {
                             </span>
                           )}
                         </div>
-
-                        {/* NEW: per-line badge */}
-                        {totals && (
-                          <div className="mt-1 text-xs">
-                            {promoApplied ? (
-                              <span className="inline-flex gap-2 rounded-full bg-emerald-50 px-2 py-1 text-emerald-700">
-                                Promo applied: user {effectiveUser}% ·
-                                commission {effectiveComm}% · saved{" "}
-                                {formatINR(lineDiscount, p.currency)}
-                              </span>
-                            ) : (
-                              <span className="inline-flex rounded-full bg-neutral-100 px-2 py-1 text-neutral-600">
-                                No promo on this item
-                              </span>
-                            )}
-                          </div>
-                        )}
+                        {/* Per-item promo/discount/commission details removed */}
                       </div>
 
-                      <div className="flex flex-col items-end gap-2">
+                      <div className="flex items-center justify-between sm:justify-end gap-3">
                         <div className="flex items-center border rounded-lg">
                           <Button
                             variant="ghost"
@@ -436,20 +394,18 @@ export default function CartPage() {
                           </Button>
                         </div>
 
-                        <p className="font-semibold">
+                        <p className="font-semibold whitespace-nowrap">
                           {formatINR(row.lineTotal, p.currency)}
                         </p>
 
-                        <div className="flex gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => removeItem(row.id)}
-                            title="Remove"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => removeItem(row.id)}
+                          title="Remove"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </div>
                     </div>
                   </CardContent>
@@ -517,14 +473,6 @@ export default function CartPage() {
                       >
                         <X className="h-4 w-4" />
                       </Button>
-                    </div>
-                  )}
-
-                  {/* Helpful hint when promo didn’t affect any items */}
-                  {!loadingTotals && promoActive && !promoAffectedAny && (
-                    <div className="p-2 rounded border text-xs bg-amber-50 border-amber-200 text-amber-700">
-                      The promo “{totals?.applied?.code}” didn’t apply to any
-                      items in your cart (items may be exempt or capped).
                     </div>
                   )}
                 </div>
