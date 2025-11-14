@@ -1,86 +1,233 @@
-export const dynamic = "force-dynamic";
+// app/api/me/payouts/request/route.ts
+import { NextRequest, NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
+import { createClient } from "@supabase/supabase-js";
+import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 
-import { NextResponse } from "next/server";
-import { headers, cookies } from "next/headers";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
+const ses = new SESClient({
+  region: process.env.AWS_REGION || "ap-south-1",
+});
 
-const json = (d:any, s=200) =>
-  NextResponse.json(d, { status: s, headers: { "cache-control": "no-store" } });
+/**
+ * Shared helper to get Supabase client + authenticated user
+ * (matches the pattern you use in other routes like /api/me/summary)
+ */
+async function withUser(req: NextRequest) {
+  const cookieStore = cookies();
 
-async function getUserOr401() {
-  const supabase = createRouteHandlerClient({ cookies });
-  const h = headers();
-  let user: any = null;
+  const sbCookies = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) {
+          return cookieStore.get(name)?.value;
+        },
+        set() {
+          // no-op on server
+        },
+        remove() {
+          // no-op on server
+        },
+      },
+    }
+  );
 
-  const auth = h.get("authorization");
-  if (auth?.startsWith("Bearer ")) {
-    const token = auth.slice(7);
-    const { data, error } = await supabase.auth.getUser(token);
-    if (!error) user = data.user;
-  }
+  let {
+    data: { user },
+  } = await sbCookies.auth.getUser();
+  let sb: any = sbCookies;
+
+  // Fallback to Authorization: Bearer token (used by your frontend)
   if (!user) {
-    const { data } = await supabase.auth.getUser();
-    user = data.user;
+    const auth = req.headers.get("authorization");
+    const token = auth?.startsWith("Bearer ") ? auth.slice(7) : null;
+
+    if (token) {
+      const sbBearer = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        {
+          global: { headers: { Authorization: `Bearer ${token}` } },
+          auth: { persistSession: false, autoRefreshToken: false },
+        }
+      );
+
+      const { data } = await sbBearer.auth.getUser(token);
+      if (data.user) {
+        user = data.user;
+        sb = sbBearer as any;
+      }
+    }
   }
-  if (!user) return { supabase, user: null, error: json({ ok:false, error:"UNAUTH" }, 401) };
-  return { supabase, user, error: null };
+
+  return { user, sb };
 }
 
-export async function POST(req: Request) {
-  const { supabase, user, error } = await getUserOr401();
-  if (!user) return error!;
-  const body = await req.json().catch(() => ({}));
+export async function POST(req: NextRequest) {
+  const { user, sb } = await withUser(req);
 
-  const method = (body.method === "store_credit" ? "store_credit" : "manual") as "store_credit"|"manual";
-  const amount = Number(body.amount ?? 0);
-  const contact_email = body.contact_email ? String(body.contact_email) : null;
-  const request_note = body.request_note ? String(body.request_note) : null;
-
-  if (!(amount > 0)) return json({ ok:false, error:"Enter a valid amount." }, 400);
-
-  // Compute available = lifetime commission - (all requested/processing/paid)
-  const { data: sumL } = await supabase
-    .from("order_attributions")
-    .select("commission_amount")
-    .eq("influencer_id", user.id);
-
-  const lifetime = (sumL ?? []).reduce((t, r:any) => t + Number(r.commission_amount || 0), 0);
-
-  const { data: sumP } = await supabase
-    .from("influencer_payouts")
-    .select("amount, status")
-    .eq("influencer_id", user.id);
-
-  const reserved = (sumP ?? []).reduce((t, r:any) => {
-    const s = String(r.status || "");
-    return (s === "initiated" || s === "processing" || s === "paid")
-      ? t + Number(r.amount || 0)
-      : t;
-  }, 0);
-
-  const available = Math.max(0, lifetime - reserved);
-  if (amount > available) {
-    return json({ ok:false, error:`Amount exceeds available ₹${Math.floor(available)}.` }, 400);
+  if (!user) {
+    return NextResponse.json(
+      { ok: false, error: "Unauthorized" },
+      { status: 401 }
+    );
   }
 
-  const payload = {
-    influencer_id: user.id,
-    amount,
-    currency: "INR",
-    status: "initiated",        // Pending
-    method,
-    contact_email,
-    request_note,
-    settled_reference: null as any,
-    notes: null as any,
-  };
+  // ---- Parse body from frontend ----
+  let body: any;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json(
+      { ok: false, error: "Invalid JSON body" },
+      { status: 400 }
+    );
+  }
 
-  const { data, error: err } = await supabase
+  const amount = Number(body.amount || 0);
+  const method: string = body.method || "manual"; // e.g. "manual", "upi", "bank"
+  const contact_email: string | null =
+    body.contact_email || user.email || null;
+  const request_note: string | null = body.request_note || null;
+
+  if (!(amount > 0)) {
+    return NextResponse.json(
+      { ok: false, error: "Amount must be greater than 0." },
+      { status: 400 }
+    );
+  }
+
+  // ---- 1) Recalculate available wallet on the server ----
+  // Same logic idea as your /api/me/summary: available = approved commissions - payouts
+  const { data: lifeAgg, error: lifeErr } = await sb
+    .from("order_attributions")
+    .select("commission_amount, status")
+    .eq("influencer_id", user.id);
+
+  if (lifeErr) {
+    console.error("order_attributions error", lifeErr);
+    return NextResponse.json(
+      { ok: false, error: "Failed to load earnings." },
+      { status: 500 }
+    );
+  }
+
+  const lifetimeRows = lifeAgg || [];
+
+  // Only commissions that are actually unlocked / withdrawable
+  const approvedTotal = lifetimeRows
+    .filter((r: any) => r.status === "approved")
+    .reduce(
+      (acc: number, r: any) => acc + Number(r.commission_amount || 0),
+      0
+    );
+
+  const { data: payoutsAgg, error: payoutsErr } = await sb
     .from("influencer_payouts")
-    .insert(payload)
-    .select("id, amount, status, method, created_at")
+    .select("amount, status")
+    .eq("influencer_id", user.id)
+    // any payout that isn't failed/canceled is treated as debited
+    .in("status", ["initiated", "processing", "paid"]);
+
+  if (payoutsErr) {
+    console.error("payouts error", payoutsErr);
+    return NextResponse.json(
+      { ok: false, error: "Failed to load payouts." },
+      { status: 500 }
+    );
+  }
+
+  const debited = (payoutsAgg || []).reduce(
+    (acc: number, r: any) => acc + Number(r.amount || 0),
+    0
+  );
+
+  const available = Math.max(0, approvedTotal - debited);
+
+  if (amount > available + 0.0001) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: `You can request up to ${available.toFixed(2)} right now.`,
+      },
+      { status: 400 }
+    );
+  }
+
+  // ---- 2) Insert payout row: this creates "Pending" in UI & debits wallet ----
+  // NOTE: even though DB default is 'pending', we explicitly set 'initiated'
+  // so it matches your frontend PayoutRow status & "Pending review" badge.
+  const { data: inserted, error: insertErr } = await sb
+    .from("influencer_payouts")
+    .insert({
+      influencer_id: user.id,
+      amount,
+      currency: "INR",
+      status: "initiated", // <-- pending request in UI
+      method,
+      contact_email,
+      notes: request_note, // JSON string with UPI/bank details from frontend
+    })
+    .select("id")
     .single();
 
-  if (err) return json({ ok:false, error: err.message }, 400);
-  return json({ ok:true, payout: data });
+  if (insertErr) {
+    console.error("insert payout error", insertErr);
+    return NextResponse.json(
+      { ok: false, error: "Could not create payout request." },
+      { status: 500 }
+    );
+  }
+
+  // ---- 3) Send AWS SES email to admin with payout details ----
+  const adminEmail = 'arunpandian972000@gmail.com'
+  const fromEmail = 'marketing@raceautoindia.com';
+
+  if (adminEmail && fromEmail) {
+    try {
+      const textLines = [
+        "New payout request",
+        "",
+        `Influencer ID: ${user.id}`,
+        `Email: ${user.email || "N/A"}`,
+        `Requested amount: ₹${amount.toFixed(2)}`,
+        `Method: ${method}`,
+        `Contact email: ${contact_email || "N/A"}`,
+        "",
+        "Raw request note (JSON):",
+        request_note || "(none)",
+      ];
+
+      const cmd = new SendEmailCommand({
+        Source: fromEmail,
+        Destination: {
+          ToAddresses: [adminEmail],
+        },
+        Message: {
+          Subject: {
+            Data: `New payout request: ₹${amount.toFixed(2)}`,
+          },
+          Body: {
+            Text: {
+              Data: textLines.join("\n"),
+            },
+          },
+        },
+      });
+
+      await ses.send(cmd);
+    } catch (err) {
+      console.error("Failed to send payout SES email", err);
+      // do NOT fail the API if email fails – the payout row is already created
+    }
+  } else {
+    console.warn(
+      "PAYOUT_ADMIN_EMAIL or SES_FROM_EMAIL not set, skipping SES email."
+    );
+  }
+
+  // ---- 4) Done ----
+  return NextResponse.json({ ok: true, payout_id: inserted.id });
 }

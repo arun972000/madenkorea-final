@@ -1,6 +1,58 @@
 import { CustomerLayout } from "@/components/CustomerLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Award, Globe, Heart, ShieldCheck } from "lucide-react";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "About Made Korea | Made Korea",
+  description:
+    "Learn about Made Korea—your trusted source for authentic Korean beauty and lifestyle products in India. Premium quality, global reach, customer-first service, and 100% authenticity.",
+  alternates: {
+    canonical: "https://madenkorea.com/about", // adjust if your route differs
+  },
+  robots: { index: true, follow: true },
+  keywords: [
+    "Made Korea",
+    "MadenKorea",
+    "About us",
+    "Korean beauty",
+    "K-beauty",
+    "authentic products",
+    "consumer innovations",
+    "India shipping",
+  ],
+  openGraph: {
+    type: "website",
+    url: "https://madenkorea.com/about",
+    siteName: "Made Korea",
+    title: "About Made Korea",
+    description:
+      "Our story, values, and commitment to 100% authentic Korean products.",
+    images: [
+      // Replace with an actual OG image in /public/og/about-og.jpg (1200×630 recommended)
+      {
+        url: "/squar-logo.png",
+        width: 1200,
+        height: 630,
+        alt: "About Made Korea",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "About Made Korea",
+    description:
+      "Our story, values, and commitment to 100% authentic Korean products.",
+    images: ["/squar-logo.png"],
+  },
+  icons: {
+    icon: "/favicon.ico",
+    apple: "/apple-touch-icon.png",
+  },
+  other: {
+    "format-detection": "telephone=no, address=no, email=no",
+  },
+};
 
 export default function AboutPage() {
   return (

@@ -1,8 +1,8 @@
 // app/c/[slug]/page.tsx
-import { notFound } from 'next/navigation';
-import { createClient } from '@supabase/supabase-js';
-import { CustomerLayout } from '@/components/CustomerLayout';
-import { ProductCard } from '@/components/ProductCard';
+import { notFound } from "next/navigation";
+import { createClient } from "@supabase/supabase-js";
+import { CustomerLayout } from "@/components/CustomerLayout";
+import { ProductCard } from "@/components/ProductCard";
 
 export const revalidate = 300; // ISR: refresh every 5 minutes
 
@@ -44,26 +44,34 @@ function supabaseServer() {
 function storagePublicUrl(path?: string | null) {
   if (!path) return null;
   const supabase = supabaseServer();
-  const { data } = supabase.storage.from('product-media').getPublicUrl(path);
+  const { data } = supabase.storage.from("product-media").getPublicUrl(path);
   return data.publicUrl ?? null;
 }
 
 export async function generateStaticParams() {
   const supabase = supabaseServer();
-  const { data } = await supabase.from('categories').select('slug').order('slug').limit(50);
+  const { data } = await supabase
+    .from("categories")
+    .select("slug")
+    .order("slug")
+    .limit(50);
   return (data ?? []).map((c) => ({ slug: c.slug }));
 }
 
-export async function generateMetadata({ params }: { params: { slug: string } }) {
+export async function generateMetadata({
+  params,
+}: {
+  params: { slug: string };
+}) {
   const supabase = supabaseServer();
   const { data: category } = await supabase
-    .from('categories')
-    .select('name, description')
-    .eq('slug', params.slug)
+    .from("categories")
+    .select("name, description")
+    .eq("slug", params.slug)
     .maybeSingle<CategoryRow>();
 
   if (!category) {
-    return { title: 'Category Not Found | Made Korea' };
+    return { title: "Category Not Found | Made Korea" };
   }
 
   return {
@@ -74,19 +82,23 @@ export async function generateMetadata({ params }: { params: { slug: string } })
       title: `${category.name} | Made Korea`,
       description: category.description ?? undefined,
       url: `/c/${params.slug}`,
-      type: 'website',
+      type: "website",
     },
   };
 }
 
-export default async function CategoryPage({ params }: { params: { slug: string } }) {
+export default async function CategoryPage({
+  params,
+}: {
+  params: { slug: string };
+}) {
   const supabase = supabaseServer();
 
   // 1) Category lookup
   const { data: category, error: catErr } = await supabase
-    .from('categories')
-    .select('*')
-    .eq('slug', params.slug)
+    .from("categories")
+    .select("*")
+    .eq("slug", params.slug)
     .maybeSingle<CategoryRow>();
 
   if (catErr || !category) {
@@ -95,18 +107,19 @@ export default async function CategoryPage({ params }: { params: { slug: string 
 
   // 2) Products in this category (published only)
   const { data: products } = await supabase
-    .from('products')
-    .select(`
+    .from("products")
+    .select(
+      `
       id, slug, name,
       price, currency,
       compare_at_price, sale_price, sale_starts_at, sale_ends_at,
       short_description, volume_ml, net_weight_g, country_of_origin,
       hero_image_path, created_at,
       brands ( name )
-    `)
-    .eq('category_id', category.id)
-    .eq('is_published', true)
-    .order('created_at', { ascending: false })
+    `
+    )
+    .eq("category_id", category.id)
+    .eq("is_published", true)
     .returns<ProductRow[]>();
 
   // 3) Compute public URLs on the server (faster cards)
@@ -114,6 +127,31 @@ export default async function CategoryPage({ params }: { params: { slug: string 
     ...p,
     hero_image_url: storagePublicUrl(p.hero_image_path) ?? undefined,
   }));
+
+  // --- sort by LAST WORD of name, reverse (Z->A) ---
+  function lastWord(s?: string | null) {
+    if (!s) return "";
+    const parts = s.trim().split(/\s+/);
+    return (parts[parts.length - 1] || "").toLowerCase();
+  }
+
+  const sortedItems = items.slice().sort((a, b) => {
+    const lb = lastWord(b.name);
+    const la = lastWord(a.name);
+    const primary = lb.localeCompare(la, undefined, { sensitivity: "base" }); // reverse
+    if (primary !== 0) return primary;
+
+    // tie-breakers: reverse by full name, then newest first
+    const byName = (b.name || "").localeCompare(a.name || "", undefined, {
+      sensitivity: "base",
+    });
+    if (byName !== 0) return byName;
+
+    return (
+      new Date(b.created_at ?? 0).getTime() -
+      new Date(a.created_at ?? 0).getTime()
+    );
+  });
 
   return (
     <CustomerLayout>
@@ -128,27 +166,32 @@ export default async function CategoryPage({ params }: { params: { slug: string 
         <div className="mb-8">
           <h1 className="text-4xl font-bold mb-2">{category.name}</h1>
           {category.description && (
-            <p className="text-lg text-muted-foreground">{category.description}</p>
+            <p className="text-lg text-muted-foreground">
+              {category.description}
+            </p>
           )}
         </div>
 
         <div className="flex items-center justify-between mb-6">
           <p className="text-muted-foreground">
-            {items.length} {items.length === 1 ? 'product' : 'products'}
+            {items.length} {items.length === 1 ? "product" : "products"}
           </p>
           {/* (Optional) Add sort/filter controls later */}
         </div>
 
         {items.length === 0 ? (
           <div className="text-center py-12">
-            <p className="text-muted-foreground">No products found in this category.</p>
+            <p className="text-muted-foreground">
+              No products found in this category.
+            </p>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {items.map((product) => (
-              <ProductCard key={product.id} product={product as any} />
-            ))}
-          </div>
+  {sortedItems.map((product) => (
+    <ProductCard key={product.id} product={product as any} />
+  ))}
+</div>
+
         )}
       </div>
     </CustomerLayout>

@@ -1,4 +1,34 @@
 import { CustomerLayout } from "@/components/CustomerLayout";
+import type { Metadata } from 'next';
+
+export const metadata: Metadata = {
+  title: 'Privacy Policy | MadenKorea',
+  description:
+    'Read how MadenKorea collects, uses, shares, and protects your personal data. Last updated October 8, 2025.',
+  alternates: {
+    canonical: 'https://madenkorea.com/privacy', // adjust if your route differs
+  },
+  robots: { index: true, follow: true },
+  openGraph: {
+    type: 'article',
+    url: 'https://madenkorea.com/privacy',
+    siteName: 'MadenKorea',
+    title: 'Privacy Policy',
+    description:
+      'Our commitment to your privacy—data we collect, how we use it, and your rights.',
+    publishedTime: '2025-10-08',
+    modifiedTime: '2025-10-08',
+  },
+  twitter: {
+    card: 'summary',
+    title: 'Privacy Policy | MadenKorea',
+    description:
+      'Our commitment to your privacy—data we collect, how we use it, and your rights.',
+  },
+  other: {
+    'format-detection': 'telephone=no, address=no, email=no',
+  },
+};
 
 export default function PrivacyPage() {
   return (

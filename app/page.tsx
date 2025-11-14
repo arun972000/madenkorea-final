@@ -18,6 +18,57 @@ import {
 import { createClient } from "@supabase/supabase-js";
 import HomeVideoCarouselSection from "@/components/home/HomeVideoCarouselSection";
 import CertificationSwiper from "@/components/Cetifications";
+import type { Metadata } from 'next';
+
+export const metadata: Metadata = {
+  title: {
+    default: 'MadenKorea — Consumer Innovations',
+    template: '%s | MadenKorea',
+  },
+  description:
+    'Discover trending products from Korea across beauty, personal care, and lifestyle. Authentic brands, curated drops, and the latest consumer innovations.',
+  keywords: [
+    'MadenKorea',
+    'Korean beauty',
+    'K-beauty',
+    'skincare',
+    'personal care',
+    'Korean brands',
+    'consumer innovations',
+    'Korea shopping',
+  ],
+  alternates: {
+    canonical: 'https://madenkorea.com/',
+  },
+  openGraph: {
+    type: 'website',
+    url: 'https://madenkorea.com/',
+    siteName: 'MadenKorea',
+    title: 'MadenKorea — Consumer Innovations',
+    description:
+      'Shop authentic Korean beauty, personal care, and lifestyle products curated for you.',
+    images: [
+      // Replace with your actual OG image (1200×630). Keep absolute URLs.
+      { url: '/logo md.png', width: 1200, height: 630, alt: 'MadenKorea homepage' },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'MadenKorea — Korean Beauty & Consumer Innovations',
+    description:
+      'Shop authentic Korean beauty, personal care, and lifestyle products curated for you.',
+    images: ['/logo md.png'],
+  },
+  icons: {
+    icon: '/favicon.ico',
+ 
+  },
+  robots: { index: true, follow: true },
+  other: {
+    'format-detection': 'telephone=no, address=no, email=no',
+  },
+};
+
 
 export const revalidate = 300; // ISR: refresh the home data every 5 minutes
 

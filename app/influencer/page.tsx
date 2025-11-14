@@ -3,20 +3,35 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import {
-  Wallet, IndianRupee, TrendingUp, CheckCircle2, Clock,
-  Share2, ChevronRight, Send, BadgePercent,
-  Copy, Pencil, Trash2, Check, X, Loader2, ChevronDown, ChevronUp, AlertCircle
+  Wallet,
+  IndianRupee,
+  TrendingUp,
+  CheckCircle2,
+  Clock,
+  Share2,
+  ChevronRight,
+  Send,
+  BadgePercent,
+  Copy,
+  Pencil,
+  Trash2,
+  Check,
+  X,
+  Loader2,
+  ChevronDown,
+  ChevronUp,
+  AlertCircle,
 } from "lucide-react";
 
 /* ---------- Types ---------- */
 type PromoRow = {
   id: string;
   code: string;
-  scope?: "global" | "product";   // we only create/manage global here
-  product_id?: string | null;     // should be null for global
+  scope?: "global" | "product"; // we only create/manage global here
+  product_id?: string | null; // should be null for global
   active: boolean;
-  discount_percent: number;       // customer %
-  commission_percent: number;     // influencer %
+  discount_percent: number; // customer %
+  commission_percent: number; // influencer %
   uses?: number;
   max_uses?: number | null;
 };
@@ -41,7 +56,11 @@ type SummaryResp = {
 
 type WalletData = {
   upi_id?: string | null;
-  bank?: { name?: string | null; number?: string | null; ifsc?: string | null } | null;
+  bank?: {
+    name?: string | null;
+    number?: string | null;
+    ifsc?: string | null;
+  } | null;
 };
 
 /* ---------- Page ---------- */
@@ -71,7 +90,10 @@ export default function InfluencerDashboardPage() {
   const [code, setCode] = useState("");
   const [userPct, setUserPct] = useState(10);
   const [commPct, setCommPct] = useState(10);
-  const sumPct = useMemo(() => Number(userPct || 0) + Number(commPct || 0), [userPct, commPct]);
+  const sumPct = useMemo(
+    () => Number(userPct || 0) + Number(commPct || 0),
+    [userPct, commPct]
+  );
   const [editing, setEditing] = useState<PromoRow | null>(null);
   const [deleting, setDeleting] = useState<PromoRow | null>(null);
 
@@ -86,7 +108,9 @@ export default function InfluencerDashboardPage() {
   /* ---------- Auth bootstrap & cookie bridge ---------- */
   useEffect(() => {
     (async () => {
-      const { data: { session} } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       const t = session?.access_token || null;
       setToken(t);
       if (t && session?.refresh_token) {
@@ -94,7 +118,10 @@ export default function InfluencerDashboardPage() {
           method: "POST",
           headers: { "content-type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({ access_token: t, refresh_token: session.refresh_token }),
+          body: JSON.stringify({
+            access_token: t,
+            refresh_token: session.refresh_token,
+          }),
         }).catch(() => {});
       }
     })();
@@ -108,7 +135,8 @@ export default function InfluencerDashboardPage() {
         headers: { Authorization: `Bearer ${tk}` },
         credentials: "include",
       });
-      const j = await r.json().catch(()=>({}));
+      const j = await r.json().catch(() => ({}));
+      console.log(j);
       if (r.ok && j?.ok) {
         setStatLifetime(Number(j.lifetime_commission || 0));
         setStatPending(Number(j.pending_total || 0));
@@ -119,7 +147,9 @@ export default function InfluencerDashboardPage() {
       setLoadingStats(false);
     }
   };
-  useEffect(() => { if (token) loadSummary(token); }, [token]);
+  useEffect(() => {
+    if (token) loadSummary(token);
+  }, [token]);
 
   /* ---------- Wallet: load (GET /api/me/wallet) ---------- */
   const loadWallet = async () => {
@@ -131,7 +161,7 @@ export default function InfluencerDashboardPage() {
         headers: { Authorization: `Bearer ${token}` },
         credentials: "include",
       });
-      const j = await r.json().catch(()=>({}));
+      const j = await r.json().catch(() => ({}));
       if (!r.ok || j?.ok === false) {
         // no saved wallet yet is OK; just mark disconnected
         setSavedWallet(null);
@@ -150,7 +180,9 @@ export default function InfluencerDashboardPage() {
       setWalletLoading(false);
     }
   };
-  useEffect(() => { if (token) loadWallet(); }, [token]);
+  useEffect(() => {
+    if (token) loadWallet();
+  }, [token]);
 
   /* ---------- Load promos (global only) ---------- */
   const loadPromos = async () => {
@@ -162,11 +194,14 @@ export default function InfluencerDashboardPage() {
         headers: { Authorization: `Bearer ${token}` },
         credentials: "include",
       });
-      const j = await res.json().catch(()=>({}));
+      const j = await res.json().catch(() => ({}));
       if (!res.ok || j?.ok === false) {
         setErr(j?.error || "Failed to load promos");
       } else {
-        const rows = (j.promos || []).filter((p: any) => (p.scope || (p.product_id ? "product" : "global")) === "global");
+        const rows = (j.promos || []).filter(
+          (p: any) =>
+            (p.scope || (p.product_id ? "product" : "global")) === "global"
+        );
         setPromos(rows);
       }
     } catch (e: any) {
@@ -175,15 +210,29 @@ export default function InfluencerDashboardPage() {
       setPromoLoading(false);
     }
   };
-  useEffect(() => { if (token) loadPromos(); }, [token]);
+  useEffect(() => {
+    if (token) loadPromos();
+  }, [token]);
 
   /* ---------- Create GLOBAL promo ---------- */
   const createPromo = async () => {
     setErr(null);
-    if (!token) { setErr("Please sign in again."); return; }
-    if (!code.trim()) { setErr("Enter your code."); return; }
-    if (userPct < 0 || userPct > 100 || commPct < 0 || commPct > 100) { setErr("Percents must be between 0 and 100."); return; }
-    if (sumPct > 20.0001) { setErr("Customer % + You % must be ≤ 20."); return; }
+    if (!token) {
+      setErr("Please sign in again.");
+      return;
+    }
+    if (!code.trim()) {
+      setErr("Enter your code.");
+      return;
+    }
+    if (userPct < 0 || userPct > 100 || commPct < 0 || commPct > 100) {
+      setErr("Percents must be between 0 and 100.");
+      return;
+    }
+    if (sumPct > 20.0001) {
+      setErr("Customer % + You % must be ≤ 20.");
+      return;
+    }
 
     const payload: Record<string, any> = {
       code: code.trim().toUpperCase(),
@@ -191,31 +240,40 @@ export default function InfluencerDashboardPage() {
       discount_percent: Number(userPct),
       commission_percent: Number(commPct),
       user_discount_pct: Number(userPct), // compat
-      commission_pct: Number(commPct),    // compat
+      commission_pct: Number(commPct), // compat
     };
 
     const res = await fetch("/api/influencer/promos", {
       method: "POST",
-      headers: { "content-type": "application/json", Authorization: `Bearer ${token}` },
+      headers: {
+        "content-type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
       credentials: "include",
       body: JSON.stringify(payload),
     });
-    const j = await res.json().catch(()=>({}));
+    const j = await res.json().catch(() => ({}));
 
     if (!res.ok || j?.ok === false) {
       setErr(j?.error || "Could not create promo.");
       return;
     }
 
-    setCode(""); setUserPct(10); setCommPct(10);
+    setCode("");
+    setUserPct(10);
+    setCommPct(10);
     setFlash("Promo created");
     setTimeout(() => setFlash(null), 1500);
     await loadPromos();
   };
 
   const copy = async (text: string) => {
-    try { await navigator.clipboard.writeText(text); setFlash("Copied"); }
-    catch { setFlash("Copy failed"); }
+    try {
+      await navigator.clipboard.writeText(text);
+      setFlash("Copied");
+    } catch {
+      setFlash("Copy failed");
+    }
     setTimeout(() => setFlash(null), 1200);
   };
 
@@ -228,14 +286,17 @@ export default function InfluencerDashboardPage() {
         headers: { Authorization: `Bearer ${token}` },
         credentials: "include",
       });
-      const j = await res.json().catch(()=>({}));
+      const j = await res.json().catch(() => ({}));
       if (res.ok && j?.ok) setPayouts((j.payouts || []) as PayoutRow[]);
     } finally {
       setListLoading(false);
     }
   };
-  useEffect(() => { if (token) loadPayouts(); }, [token]);
+  useEffect(() => {
+    if (token) loadPayouts();
+  }, [token]);
 
+  // Keep this for UX messaging (we no longer hard-block opening the modal with it)
   const canRequest = statWallet > 0.0001;
 
   // Mask helper for showing saved wallet in the card header
@@ -243,7 +304,9 @@ export default function InfluencerDashboardPage() {
     if (walletLoading) return "Loading…";
     if (!walletConnected || !savedWallet) return "Not connected";
     if (savedWallet.upi_id) return `UPI • ${savedWallet.upi_id}`;
-    const last4 = savedWallet.bank?.number ? savedWallet.bank.number.slice(-4) : "";
+    const last4 = savedWallet.bank?.number
+      ? savedWallet.bank.number.slice(-4)
+      : "";
     return last4 ? `Bank • ****${last4}` : "Bank • saved";
   })();
 
@@ -254,10 +317,16 @@ export default function InfluencerDashboardPage() {
         <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
           <div>
             <h1 className="text-lg font-semibold">Your dashboard</h1>
-            <p className="text-xs text-neutral-600">Create global promos, track earnings & request manual payouts — all here.</p>
+            <p className="text-xs text-neutral-600">
+              Create global promos, track earnings & request manual payouts —
+              all here.
+            </p>
           </div>
           <div className="flex gap-2">
-            <a href="/influencer/links" className="inline-flex items-center gap-2 rounded-xl border bg-neutral-50 px-3 py-2 text-sm font-medium">
+            <a
+              href="/influencer/links"
+              className="inline-flex items-center gap-2 rounded-xl border bg-neutral-50 px-3 py-2 text-sm font-medium"
+            >
               <Share2 className="h-4 w-4" />
               Share links
             </a>
@@ -267,10 +336,30 @@ export default function InfluencerDashboardPage() {
 
       {/* ===== STATS ROW ===== */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard loading={loadingStats} icon={<TrendingUp className="h-5 w-5" />} label="Commission (lifetime)" value={toINR(statLifetime)} />
-        <StatCard loading={loadingStats} icon={<Clock className="h-5 w-5" />} label="Pending" value={toINR(statPending)} />
-        <StatCard loading={loadingStats} icon={<CheckCircle2 className="h-5 w-5" />} label="Paid" value={toINR(statPaid)} />
-        <StatCard loading={loadingStats} icon={<IndianRupee className="h-5 w-5" />} label="Available" value={toINR(statWallet)} />
+        <StatCard
+          loading={loadingStats}
+          icon={<TrendingUp className="h-5 w-5" />}
+          label="Commission (lifetime)"
+          value={toINR(statLifetime)}
+        />
+        <StatCard
+          loading={loadingStats}
+          icon={<Clock className="h-5 w-5" />}
+          label="Pending"
+          value={toINR(statPending)}
+        />
+        <StatCard
+          loading={loadingStats}
+          icon={<CheckCircle2 className="h-5 w-5" />}
+          label="Paid"
+          value={toINR(statPaid)}
+        />
+        <StatCard
+          loading={loadingStats}
+          icon={<IndianRupee className="h-5 w-5" />}
+          label="Available"
+          value={toINR(statWallet)}
+        />
       </div>
 
       {/* ===== WALLET & REDEEM ===== */}
@@ -289,7 +378,9 @@ export default function InfluencerDashboardPage() {
                 <p className="mt-1 text-[11px] text-neutral-600">
                   <span className="font-medium">Wallet:</span> {walletBadgeText}
                 </p>
-                {walletError && <p className="mt-1 text-[11px] text-red-700">{walletError}</p>}
+                {walletError && (
+                  <p className="mt-1 text-[11px] text-red-700">{walletError}</p>
+                )}
               </div>
             </div>
             <button
@@ -304,27 +395,49 @@ export default function InfluencerDashboardPage() {
             <button
               className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-black px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
               onClick={() => setShowRedeemModal(true)}
-              disabled={!canRequest}
+              disabled={loadingStats}
             >
               <Send className="h-4 w-4" />
               Request payout
             </button>
-            <a href="/influencer/payouts" className="inline-flex w-full items-center justify-center gap-2 rounded-xl border bg-neutral-50 px-4 py-2.5 text-sm font-semibold">
+            <a
+              href="/influencer/payouts"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border bg-neutral-50 px-4 py-2.5 text-sm font-semibold"
+            >
               See payout history
               <ChevronRight className="h-4 w-4" />
             </a>
           </div>
-          <p className="mt-2 text-[11px] text-neutral-600">Available to withdraw: {toINR(statWallet)}. You can request any amount up to this balance.</p>
+          <p className="mt-2 text-[11px] text-neutral-600">
+            Available to withdraw: {toINR(statWallet)}. You can request any
+            amount up to this balance.
+          </p>
+          {!canRequest && !loadingStats && (
+            <p className="mt-1 text-[11px] text-red-600">
+              You don&apos;t have any approved balance yet. Once your
+              commissions are approved, they&apos;ll appear in Available and you
+              can request a payout.
+            </p>
+          )}
         </div>
 
         {/* Info & messages */}
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
           <div className="text-sm font-semibold">Tips</div>
           <p className="mt-1 text-xs text-neutral-600">
-            Global codes apply to the entire cart; server still enforces per-product caps.
+            Global codes apply to the entire cart; server still enforces
+            per-product caps.
           </p>
-          {flash && <div className="mt-2 rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-700">{flash}</div>}
-          {err && <div className="mt-2 rounded-md bg-red-50 px-2 py-1 text-xs text-red-700">{err}</div>}
+          {flash && (
+            <div className="mt-2 rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-700">
+              {flash}
+            </div>
+          )}
+          {err && (
+            <div className="mt-2 rounded-md bg-red-50 px-2 py-1 text-xs text-red-700">
+              {err}
+            </div>
+          )}
         </div>
       </div>
 
@@ -348,21 +461,31 @@ export default function InfluencerDashboardPage() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium">Customer discount (%)</label>
+              <label className="mb-1 block text-xs font-medium">
+                Customer discount (%)
+              </label>
               <input
                 className="w-full rounded-lg border px-3 py-2 text-sm"
-                type="number" min={0} max={100} step={0.5}
+                type="number"
+                min={0}
+                max={100}
+                step={0.5}
                 value={userPct}
-                onChange={(e)=>setUserPct(Number(e.target.value))}
+                onChange={(e) => setUserPct(Number(e.target.value))}
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium">Your commission (%)</label>
+              <label className="mb-1 block text-xs font-medium">
+                Your commission (%)
+              </label>
               <input
                 className="w-full rounded-lg border px-3 py-2 text-sm"
-                type="number" min={0} max={100} step={0.5}
+                type="number"
+                min={0}
+                max={100}
+                step={0.5}
                 value={commPct}
-                onChange={(e)=>setCommPct(Number(e.target.value))}
+                onChange={(e) => setCommPct(Number(e.target.value))}
               />
             </div>
           </div>
@@ -371,11 +494,18 @@ export default function InfluencerDashboardPage() {
             <button
               type="button"
               className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs"
-              onClick={() => { setUserPct(10); setCommPct(10); }}
+              onClick={() => {
+                setUserPct(10);
+                setCommPct(10);
+              }}
             >
               <Check className="h-4 w-4" /> Recommended 10% + 10%
             </button>
-            <p className={`text-[11px] ${sumPct > 20 ? "text-red-600" : "text-neutral-600"}`}>
+            <p
+              className={`text-[11px] ${
+                sumPct > 20 ? "text-red-600" : "text-neutral-600"
+              }`}
+            >
               Split total: {sumPct}% • Typical cap is 20%.
             </p>
           </div>
@@ -404,22 +534,43 @@ export default function InfluencerDashboardPage() {
           ) : (
             <ul className="divide-y">
               {promos.map((p) => (
-                <li key={p.id} className="flex flex-col items-start gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <li
+                  key={p.id}
+                  className="flex flex-col items-start gap-2 py-3 sm:flex-row sm:items-center sm:justify-between"
+                >
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="inline-flex items-center gap-1 rounded-lg border bg-neutral-50 px-2 py-1 text-xs font-semibold">
                         {p.code}
-                        <button className="rounded p-1 hover:bg-neutral-100" onClick={() => copy(p.code)} aria-label="Copy code">
+                        <button
+                          className="rounded p-1 hover:bg-neutral-100"
+                          onClick={() => copy(p.code)}
+                          aria-label="Copy code"
+                        >
                           <Copy className="h-3.5 w-3.5" />
                         </button>
                       </span>
-                      <span className="inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">Global</span>
-                      <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] ${p.active ? "bg-emerald-50 text-emerald-700" : "bg-neutral-100 text-neutral-700"}`}>
+                      <span className="inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">
+                        Global
+                      </span>
+                      <span
+                        className={`inline-flex rounded-full px-2 py-0.5 text-[11px] ${
+                          p.active
+                            ? "bg-emerald-50 text-emerald-700"
+                            : "bg-neutral-100 text-neutral-700"
+                        }`}
+                      >
                         {p.active ? "Active" : "Inactive"}
                       </span>
                     </div>
                     <div className="mt-1 text-xs text-neutral-600">
-                      Customer {p.discount_percent}% + You {p.commission_percent}%{typeof p.uses === "number" ? ` • Uses ${p.uses}${p.max_uses ? ` / ${p.max_uses}` : ""}` : ""}
+                      Customer {p.discount_percent}% + You{" "}
+                      {p.commission_percent}%
+                      {typeof p.uses === "number"
+                        ? ` • Uses ${p.uses}${
+                            p.max_uses ? ` / ${p.max_uses}` : ""
+                          }`
+                        : ""}
                     </div>
                   </div>
 
@@ -452,7 +603,10 @@ export default function InfluencerDashboardPage() {
         {listLoading ? (
           <ListSkeleton />
         ) : payouts.length === 0 ? (
-          <EmptyState title="No payouts yet" desc="Use the Request button above to submit your first payout." />
+          <EmptyState
+            title="No payouts yet"
+            desc="Use the Request button above to submit your first payout."
+          />
         ) : (
           <ul className="divide-y">
             {payouts.slice(0, 8).map((p) => (
@@ -460,7 +614,12 @@ export default function InfluencerDashboardPage() {
             ))}
           </ul>
         )}
-        <a href="/influencer/payouts" className="mt-3 inline-block text-xs font-medium text-neutral-700 underline">View all</a>
+        <a
+          href="/influencer/payouts"
+          className="mt-3 inline-block text-xs font-medium text-neutral-700 underline"
+        >
+          View all
+        </a>
       </div>
 
       {/* ===== Wallet modal (LOAD + SAVE) ===== */}
@@ -470,7 +629,9 @@ export default function InfluencerDashboardPage() {
           loadInitial={savedWallet}
           onSaved={(w) => {
             setSavedWallet(w);
-            setWalletConnected(!!(w.upi_id || (w.bank?.number && w.bank?.ifsc)));
+            setWalletConnected(
+              !!(w.upi_id || (w.bank?.number && w.bank?.ifsc))
+            );
             setFlash("Wallet saved");
             setTimeout(() => setFlash(null), 1200);
           }}
@@ -479,7 +640,10 @@ export default function InfluencerDashboardPage() {
 
       {/* ===== Redeem (manual payout) modal ===== */}
       {showRedeemModal && (
-        <Modal onClose={() => setShowRedeemModal(false)} title="Request payout (manual)">
+        <Modal
+          onClose={() => setShowRedeemModal(false)}
+          title="Request payout (manual)"
+        >
           <RequestManualBody
             maxAmount={statWallet}
             onClose={() => setShowRedeemModal(false)}
@@ -498,7 +662,11 @@ export default function InfluencerDashboardPage() {
         <EditPromoModal
           promo={editing}
           onClose={() => setEditing(null)}
-          onSaved={async () => { setEditing(null); await loadPromos(); setFlash("Promo updated"); }}
+          onSaved={async () => {
+            setEditing(null);
+            await loadPromos();
+            setFlash("Promo updated");
+          }}
         />
       )}
 
@@ -506,7 +674,11 @@ export default function InfluencerDashboardPage() {
         <DeletePromoModal
           promo={deleting}
           onClose={() => setDeleting(null)}
-          onDeleted={async () => { setDeleting(null); await loadPromos(); setFlash("Promo deleted"); }}
+          onDeleted={async () => {
+            setDeleting(null);
+            await loadPromos();
+            setFlash("Promo deleted");
+          }}
         />
       )}
     </div>
@@ -517,14 +689,14 @@ export default function InfluencerDashboardPage() {
 function WalletModal({
   onClose,
   loadInitial,
-  onSaved
+  onSaved,
 }: {
   onClose: () => void;
   loadInitial: WalletData | null;
   onSaved: (w: WalletData) => void;
 }) {
   const supabase = createClientComponentClient();
-  const [channel, setChannel] = useState<"upi"|"bank">(
+  const [channel, setChannel] = useState<"upi" | "bank">(
     loadInitial?.upi_id ? "upi" : "bank"
   );
   const [upiId, setUpiId] = useState(loadInitial?.upi_id || "");
@@ -532,35 +704,49 @@ function WalletModal({
   const [accNo, setAccNo] = useState(loadInitial?.bank?.number || "");
   const [ifsc, setIfsc] = useState(loadInitial?.bank?.ifsc || "");
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string|null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const save = async () => {
     setError(null);
-    const { data: { session } } = await supabase.auth.getSession();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
     const token = session?.access_token;
-    if (!token) { setError("Please sign in again."); return; }
+    if (!token) {
+      setError("Please sign in again.");
+      return;
+    }
 
     let payload: WalletData;
     if (channel === "upi") {
-      if (!upiId.trim()) { setError("Enter a valid UPI ID."); return; }
+      if (!upiId.trim()) {
+        setError("Enter a valid UPI ID.");
+        return;
+      }
       payload = { upi_id: upiId.trim(), bank: null };
     } else {
       if (!accName.trim() || !accNo.trim() || !ifsc.trim()) {
         setError("Enter account holder name, number and IFSC.");
         return;
       }
-      payload = { upi_id: null, bank: { name: accName.trim(), number: accNo.trim(), ifsc: ifsc.trim() } };
+      payload = {
+        upi_id: null,
+        bank: { name: accName.trim(), number: accNo.trim(), ifsc: ifsc.trim() },
+      };
     }
 
     setSaving(true);
     try {
       const res = await fetch("/api/me/wallet", {
         method: "POST",
-        headers: { "content-type": "application/json", Authorization: `Bearer ${token}` },
+        headers: {
+          "content-type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         credentials: "include",
         body: JSON.stringify(payload),
       });
-      const j = await res.json().catch(()=>({}));
+      const j = await res.json().catch(() => ({}));
       if (!res.ok || j?.ok === false) {
         setError(j?.error || "Could not save wallet");
         return;
@@ -581,15 +767,25 @@ function WalletModal({
           <button
             type="button"
             onClick={() => setChannel("upi")}
-            className={`rounded-xl border px-3 py-2 ${channel==="upi" ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "bg-neutral-50"}`}
+            className={`rounded-xl border px-3 py-2 ${
+              channel === "upi"
+                ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+                : "bg-neutral-50"
+            }`}
           >
             UPI
-            <div className="text-[11px] text-neutral-600">Fast & simple (UPI ID)</div>
+            <div className="text-[11px] text-neutral-600">
+              Fast & simple (UPI ID)
+            </div>
           </button>
           <button
             type="button"
             onClick={() => setChannel("bank")}
-            className={`rounded-xl border px-3 py-2 ${channel==="bank" ? "border-sky-300 bg-sky-50 text-sky-800" : "bg-neutral-50"}`}
+            className={`rounded-xl border px-3 py-2 ${
+              channel === "bank"
+                ? "border-sky-300 bg-sky-50 text-sky-800"
+                : "bg-neutral-50"
+            }`}
           >
             Bank
             <div className="text-[11px] text-neutral-600">Account + IFSC</div>
@@ -603,7 +799,7 @@ function WalletModal({
               className="mt-1 w-full rounded-lg border px-3 py-2"
               placeholder="name@bank"
               value={upiId}
-              onChange={(e)=>setUpiId(e.target.value)}
+              onChange={(e) => setUpiId(e.target.value)}
             />
           </div>
         ) : (
@@ -614,7 +810,7 @@ function WalletModal({
                 className="mt-1 w-full rounded-lg border px-3 py-2"
                 placeholder="Full name"
                 value={accName}
-                onChange={(e)=>setAccName(e.target.value)}
+                onChange={(e) => setAccName(e.target.value)}
               />
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -624,7 +820,7 @@ function WalletModal({
                   className="mt-1 w-full rounded-lg border px-3 py-2"
                   placeholder="XXXXXXXXXX"
                   value={accNo}
-                  onChange={(e)=>setAccNo(e.target.value)}
+                  onChange={(e) => setAccNo(e.target.value)}
                 />
               </div>
               <div>
@@ -633,17 +829,24 @@ function WalletModal({
                   className="mt-1 w-full rounded-lg border px-3 py-2"
                   placeholder="HDFC0000000"
                   value={ifsc}
-                  onChange={(e)=>setIfsc(e.target.value)}
+                  onChange={(e) => setIfsc(e.target.value)}
                 />
               </div>
             </div>
           </div>
         )}
 
-        {error && <div className="rounded-md bg-red-50 px-2 py-1 text-xs text-red-700">{error}</div>}
+        {error && (
+          <div className="rounded-md bg-red-50 px-2 py-1 text-xs text-red-700">
+            {error}
+          </div>
+        )}
 
         <div className="mt-2 flex gap-2">
-          <button onClick={onClose} className="inline-flex w-full items-center justify-center gap-2 rounded-lg border bg-neutral-50 px-4 py-2 font-semibold">
+          <button
+            onClick={onClose}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg border bg-neutral-50 px-4 py-2 font-semibold"
+          >
             <X className="h-4 w-4" /> Cancel
           </button>
           <button
@@ -651,13 +854,18 @@ function WalletModal({
             disabled={saving}
             className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-black px-4 py-2 font-semibold text-white disabled:opacity-60"
           >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+            {saving ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Check className="h-4 w-4" />
+            )}
             Save
           </button>
         </div>
 
         <div className="rounded-lg bg-neutral-50 p-2 text-[11px] text-neutral-600">
-          Your details are only visible to our payouts team and used for transfers.
+          Your details are only visible to our payouts team and used for
+          transfers.
         </div>
       </div>
     </Modal>
@@ -681,12 +889,20 @@ function PayoutRowCard({ row }: { row: PayoutRow }) {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-base font-semibold">{toINR(row.amount, row.currency)}</span>
-            <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] ${badge.cls}`}>{badge.text}</span>
+            <span className="text-base font-semibold">
+              {toINR(row.amount, row.currency)}
+            </span>
+            <span
+              className={`inline-flex rounded-full px-2 py-0.5 text-[11px] ${badge.cls}`}
+            >
+              {badge.text}
+            </span>
           </div>
           <div className="mt-0.5 text-xs text-neutral-600">
             {new Date(row.created_at).toLocaleString()}
-            {row.status === "paid" && row.paid_at ? ` • Paid ${new Date(row.paid_at).toLocaleString()}` : ""}
+            {row.status === "paid" && row.paid_at
+              ? ` • Paid ${new Date(row.paid_at).toLocaleString()}`
+              : ""}
             {row.notes ? ` • ${row.notes}` : ""}
           </div>
         </div>
@@ -697,7 +913,11 @@ function PayoutRowCard({ row }: { row: PayoutRow }) {
               className="inline-flex items-center gap-1 rounded-lg border bg-neutral-50 px-3 py-1.5 text-xs"
               onClick={() => setOpen((o) => !o)}
             >
-              {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              {open ? (
+                <ChevronUp className="h-3.5 w-3.5" />
+              ) : (
+                <ChevronDown className="h-3.5 w-3.5" />
+              )}
               Orders ({row.covering_orders.length})
             </button>
           )}
@@ -709,7 +929,9 @@ function PayoutRowCard({ row }: { row: PayoutRow }) {
           <div className="mb-1 font-medium">Covering orders</div>
           <ul className="grid grid-cols-1 gap-1 sm:grid-cols-2">
             {row.covering_orders.map((oid) => (
-              <li key={oid} className="truncate">Order: {oid}</li>
+              <li key={oid} className="truncate">
+                Order: {oid}
+              </li>
             ))}
           </ul>
         </div>
@@ -719,14 +941,37 @@ function PayoutRowCard({ row }: { row: PayoutRow }) {
 }
 
 /* ---------- Modal shell ---------- */
-function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
+function Modal({
+  title,
+  children,
+  onClose,
+}: {
+  title: string;
+  children: React.ReactNode;
+  onClose: () => void;
+}) {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-end sm:place-items-center" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" aria-hidden="true" />
-      <div className="relative z-10 w-full max-w-md rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl sm:p-6" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 z-50 grid place-items-end sm:place-items-center"
+      onClick={onClose}
+    >
+      <div
+        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+        aria-hidden="true"
+      />
+      <div
+        className="relative z-10 w-full max-w-md rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl sm:p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="mb-2 flex items-center justify-between">
           <div className="text-base font-semibold">{title}</div>
-          <button className="rounded p-1 hover:bg-neutral-100" onClick={onClose} aria-label="Close">✕</button>
+          <button
+            className="rounded p-1 hover:bg-neutral-100"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            ✕
+          </button>
         </div>
         {children}
       </div>
@@ -747,7 +992,9 @@ function RequestManualBody({
   const supabase = createClientComponentClient();
 
   const [amount, setAmount] = useState<number>(Math.floor(maxAmount) || 0);
-  const [step, setStep] = useState<number>(Math.max(50, Math.round((maxAmount || 1000) / 50)));
+  const [step, setStep] = useState<number>(
+    Math.max(50, Math.round((maxAmount || 1000) / 50))
+  );
   useEffect(() => {
     const fallback = Math.floor(maxAmount) || 0;
     setAmount(fallback);
@@ -767,11 +1014,20 @@ function RequestManualBody({
 
   const submit = async () => {
     setErr(null);
-    if (!(amount > 0)) { setErr("Enter an amount greater than 0."); return; }
-    if (amount > maxAmount + 0.0001) { setErr(`You can request up to ${toINR(maxAmount)} right now.`); return; }
+    if (!(amount > 0)) {
+      setErr("Enter an amount greater than 0.");
+      return;
+    }
+    if (amount > maxAmount + 0.0001) {
+      setErr(`You can request up to ${toINR(maxAmount)} right now.`);
+      return;
+    }
 
     if (channel === "upi") {
-      if (!upiId.trim()) { setErr("Enter your UPI ID."); return; }
+      if (!upiId.trim()) {
+        setErr("Enter your UPI ID.");
+        return;
+      }
     } else {
       if (!accName.trim() || !accNo.trim() || !ifsc.trim()) {
         setErr("Enter your bank account name, number, and IFSC.");
@@ -780,14 +1036,23 @@ function RequestManualBody({
     }
 
     setSaving(true);
-    const { data: { session } } = await supabase.auth.getSession();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
     const token = session?.access_token;
-    if (!token) { setSaving(false); setErr("Please sign in again."); return; }
+    if (!token) {
+      setSaving(false);
+      setErr("Please sign in again.");
+      return;
+    }
 
     const details = {
       payment_channel: channel,
       upi_id: channel === "upi" ? upiId.trim() : null,
-      bank: channel === "bank" ? { name: accName.trim(), number: accNo.trim(), ifsc: ifsc.trim() } : null,
+      bank:
+        channel === "bank"
+          ? { name: accName.trim(), number: accNo.trim(), ifsc: ifsc.trim() }
+          : null,
       contact: contact || null,
       user_note: note || null,
     };
@@ -795,7 +1060,10 @@ function RequestManualBody({
 
     const res = await fetch("/api/me/payouts/request", {
       method: "POST",
-      headers: { "content-type": "application/json", Authorization: `Bearer ${token}` },
+      headers: {
+        "content-type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
       credentials: "include",
       body: JSON.stringify({
         method: "manual",
@@ -804,7 +1072,7 @@ function RequestManualBody({
         request_note,
       }),
     });
-    const j = await res.json().catch(()=>({}));
+    const j = await res.json().catch(() => ({}));
     setSaving(false);
 
     if (!res.ok || j?.ok === false) {
@@ -814,8 +1082,18 @@ function RequestManualBody({
     onDone();
   };
 
+  const canSubmit = maxAmount > 0 && !saving;
+
   return (
     <div className="space-y-4 text-sm">
+      {maxAmount <= 0 && (
+        <div className="rounded-lg bg-neutral-50 p-3 text-xs text-neutral-700">
+          You don&apos;t have any available balance to withdraw right now. Once
+          your commissions are approved and added to your wallet, you&apos;ll be
+          able to submit a payout request here.
+        </div>
+      )}
+
       <div className="rounded-lg border bg-neutral-50 p-3">
         <div className="flex items-center justify-between">
           <div className="font-semibold">Withdraw amount</div>
@@ -828,7 +1106,8 @@ function RequestManualBody({
           max={Math.floor(maxAmount)}
           step={step}
           value={amount}
-          onChange={(e)=>setAmount(Number(e.target.value))}
+          disabled={maxAmount <= 0}
+          onChange={(e) => setAmount(Number(e.target.value))}
         />
         <div className="mt-2 flex items-center gap-2">
           <input
@@ -838,9 +1117,12 @@ function RequestManualBody({
             step={step}
             className="w-28 rounded-lg border px-3 py-2"
             value={amount}
-            onChange={(e)=>setAmount(Number(e.target.value))}
+            disabled={maxAmount <= 0}
+            onChange={(e) => setAmount(Number(e.target.value))}
           />
-          <div className="text-[11px] text-neutral-600">Available: {toINR(maxAmount)}</div>
+          <div className="text-[11px] text-neutral-600">
+            Available: {toINR(maxAmount)}
+          </div>
         </div>
       </div>
 
@@ -848,15 +1130,25 @@ function RequestManualBody({
         <button
           type="button"
           onClick={() => setChannel("upi")}
-          className={`rounded-xl border px-3 py-2 ${channel==="upi" ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "bg-neutral-50"}`}
+          className={`rounded-xl border px-3 py-2 ${
+            channel === "upi"
+              ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+              : "bg-neutral-50"
+          }`}
         >
           UPI transfer
-          <div className="text-[11px] text-neutral-600">Fast & simple (UPI ID)</div>
+          <div className="text-[11px] text-neutral-600">
+            Fast & simple (UPI ID)
+          </div>
         </button>
         <button
           type="button"
           onClick={() => setChannel("bank")}
-          className={`rounded-xl border px-3 py-2 ${channel==="bank" ? "border-sky-300 bg-sky-50 text-sky-800" : "bg-neutral-50"}`}
+          className={`rounded-xl border px-3 py-2 ${
+            channel === "bank"
+              ? "border-sky-300 bg-sky-50 text-sky-800"
+              : "bg-neutral-50"
+          }`}
         >
           Bank transfer
           <div className="text-[11px] text-neutral-600">Account + IFSC</div>
@@ -866,51 +1158,81 @@ function RequestManualBody({
       {channel === "upi" ? (
         <div>
           <label className="text-xs font-medium">UPI ID</label>
-          <input className="mt-1 w-full rounded-lg border px-3 py-2" placeholder="name@bank"
-                 value={upiId} onChange={(e)=>setUpiId(e.target.value)} />
+          <input
+            className="mt-1 w-full rounded-lg border px-3 py-2"
+            placeholder="name@bank"
+            value={upiId}
+            onChange={(e) => setUpiId(e.target.value)}
+          />
         </div>
       ) : (
         <div className="space-y-2">
           <div>
             <label className="text-xs font-medium">Account holder name</label>
-            <input className="mt-1 w-full rounded-lg border px-3 py-2" placeholder="Full name"
-                   value={accName} onChange={(e)=>setAccName(e.target.value)} />
+            <input
+              className="mt-1 w-full rounded-lg border px-3 py-2"
+              placeholder="Full name"
+              value={accName}
+              onChange={(e) => setAccName(e.target.value)}
+            />
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="text-xs font-medium">Account number</label>
-              <input className="mt-1 w-full rounded-lg border px-3 py-2" placeholder="XXXXXXXXXX"
-                     value={accNo} onChange={(e)=>setAccNo(e.target.value)} />
+              <input
+                className="mt-1 w-full rounded-lg border px-3 py-2"
+                placeholder="XXXXXXXXXX"
+                value={accNo}
+                onChange={(e) => setAccNo(e.target.value)}
+              />
             </div>
             <div>
               <label className="text-xs font-medium">IFSC</label>
-              <input className="mt-1 w-full rounded-lg border px-3 py-2" placeholder="HDFC0000000"
-                     value={ifsc} onChange={(e)=>setIfsc(e.target.value)} />
+              <input
+                className="mt-1 w-full rounded-lg border px-3 py-2"
+                placeholder="HDFC0000000"
+                value={ifsc}
+                onChange={(e) => setIfsc(e.target.value)}
+              />
             </div>
           </div>
         </div>
       )}
 
-      <div className="rounded-lg bg-amber-50 p-3 text-amber-800 text-xs flex gap-2">
-        <AlertCircle className="mt-0.5 h-4 w-4" />
-        <div>
-          Your payout request will appear as <em>Pending</em> until processed by admin. Keep your details updated here.
+      <div className="space-y-2 text-xs text-neutral-700">
+        <div className="rounded-lg bg-amber-50 p-3 text-amber-800 flex gap-2">
+          <AlertCircle className="mt-0.5 h-4 w-4" />
+          <div>
+            Your payout request will appear as <em>Pending</em> until processed
+            by admin. We&apos;ll notify our payouts team with your details.
+          </div>
         </div>
       </div>
 
-      {err && <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{err}</div>}
+      {err && (
+        <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
+          {err}
+        </div>
+      )}
 
       <div className="mt-2 flex gap-2">
-        <button onClick={onClose} className="inline-flex w-full items-center justify-center gap-2 rounded-lg border bg-neutral-50 px-4 py-2 font-semibold">
+        <button
+          onClick={onClose}
+          className="inline-flex w-full items-center justify-center gap-2 rounded-lg border bg-neutral-50 px-4 py-2 font-semibold"
+        >
           <X className="h-4 w-4" /> Close
         </button>
         <button
-          onClick={save}
-          disabled={saving}
+          onClick={submit}
+          disabled={!canSubmit}
           className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-black px-4 py-2 font-semibold text-white disabled:opacity-60"
         >
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-          Save wallet
+          {saving ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Check className="h-4 w-4" />
+          )}
+          Request payout
         </button>
       </div>
     </div>
@@ -919,8 +1241,14 @@ function RequestManualBody({
 
 /* ---------- Edit & Delete Promo Modals (unchanged) ---------- */
 function EditPromoModal({
-  promo, onClose, onSaved
-}: { promo: PromoRow; onClose: () => void; onSaved: () => void }) {
+  promo,
+  onClose,
+  onSaved,
+}: {
+  promo: PromoRow;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
   const supabase = createClientComponentClient();
 
   const [form, setForm] = useState({
@@ -929,15 +1257,26 @@ function EditPromoModal({
     commission_percent: promo.commission_percent,
   });
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string|null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const sum = useMemo(() => Number(form.discount_percent || 0) + Number(form.commission_percent || 0), [form]);
+  const sum = useMemo(
+    () =>
+      Number(form.discount_percent || 0) + Number(form.commission_percent || 0),
+    [form]
+  );
 
   const save = async () => {
-    setSaving(true); setError(null);
-    const { data: { session } } = await supabase.auth.getSession();
+    setSaving(true);
+    setError(null);
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
     const token = session?.access_token;
-    if (!token) { setSaving(false); setError("Please sign in again."); return; }
+    if (!token) {
+      setSaving(false);
+      setError("Please sign in again.");
+      return;
+    }
 
     if (sum > 20.0001) {
       setSaving(false);
@@ -945,19 +1284,25 @@ function EditPromoModal({
       return;
     }
 
-    const res = await fetch(`/api/influencer/promos/${encodeURIComponent(promo.id)}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json", Authorization: `Bearer ${token}` },
-      credentials: "include",
-      body: JSON.stringify({
-        active: !!form.active,
-        discount_percent: Number(form.discount_percent),
-        commission_percent: Number(form.commission_percent),
-        user_discount_pct: Number(form.discount_percent),
-        commission_pct: Number(form.commission_percent),
-      }),
-    });
-    const j = await res.json().catch(()=>({}));
+    const res = await fetch(
+      `/api/influencer/promos/${encodeURIComponent(promo.id)}`,
+      {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          active: !!form.active,
+          discount_percent: Number(form.discount_percent),
+          commission_percent: Number(form.commission_percent),
+          user_discount_pct: Number(form.discount_percent),
+          commission_pct: Number(form.commission_percent),
+        }),
+      }
+    );
+    const j = await res.json().catch(() => ({}));
 
     setSaving(false);
     if (!res.ok || j?.ok === false) {
@@ -976,7 +1321,9 @@ function EditPromoModal({
             type="checkbox"
             className="h-4 w-4"
             checked={form.active}
-            onChange={(e)=>setForm(f=>({ ...f, active: e.target.checked }))}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, active: e.target.checked }))
+            }
           />
         </label>
 
@@ -984,31 +1331,58 @@ function EditPromoModal({
           <div>
             <label className="text-xs font-medium">Customer %</label>
             <input
-              type="number" min={0} max={100} step="0.5"
+              type="number"
+              min={0}
+              max={100}
+              step="0.5"
               className="mt-1 w-full rounded-lg border px-3 py-2"
               value={form.discount_percent}
-              onChange={(e)=>setForm(f=>({ ...f, discount_percent: Number(e.target.value) }))}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  discount_percent: Number(e.target.value),
+                }))
+              }
             />
           </div>
           <div>
             <label className="text-xs font-medium">You %</label>
             <input
-              type="number" min={0} max={100} step="0.5"
+              type="number"
+              min={0}
+              max={100}
+              step="0.5"
               className="mt-1 w-full rounded-lg border px-3 py-2"
               value={form.commission_percent}
-              onChange={(e)=>setForm(f=>({ ...f, commission_percent: Number(e.target.value) }))}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  commission_percent: Number(e.target.value),
+                }))
+              }
             />
           </div>
         </div>
 
-        <p className={`text-[11px] ${sum > 20 ? "text-red-600" : "text-neutral-600"}`}>
+        <p
+          className={`text-[11px] ${
+            sum > 20 ? "text-red-600" : "text-neutral-600"
+          }`}
+        >
           Split total: {sum}% • Typical cap is 20%.
         </p>
 
-        {error && <div className="rounded-md bg-red-50 px-2 py-1 text-xs text-red-700">{error}</div>}
+        {error && (
+          <div className="rounded-md bg-red-50 px-2 py-1 text-xs text-red-700">
+            {error}
+          </div>
+        )}
 
         <div className="mt-2 flex gap-2">
-          <button onClick={onClose} className="inline-flex w-full items-center justify-center gap-2 rounded-lg border bg-neutral-50 px-4 py-2 font-semibold">
+          <button
+            onClick={onClose}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg border bg-neutral-50 px-4 py-2 font-semibold"
+          >
             <X className="h-4 w-4" /> Cancel
           </button>
           <button
@@ -1016,7 +1390,11 @@ function EditPromoModal({
             disabled={saving}
             className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-black px-4 py-2 font-semibold text-white disabled:opacity-60"
           >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+            {saving ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Check className="h-4 w-4" />
+            )}
             Save
           </button>
         </div>
@@ -1026,24 +1404,40 @@ function EditPromoModal({
 }
 
 function DeletePromoModal({
-  promo, onClose, onDeleted
-}: { promo: PromoRow; onClose: () => void; onDeleted: () => void }) {
+  promo,
+  onClose,
+  onDeleted,
+}: {
+  promo: PromoRow;
+  onClose: () => void;
+  onDeleted: () => void;
+}) {
   const supabase = createClientComponentClient();
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string|null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const remove = async () => {
-    setBusy(true); setError(null);
-    const { data: { session } } = await supabase.auth.getSession();
+    setBusy(true);
+    setError(null);
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
     const token = session?.access_token;
-    if (!token) { setBusy(false); setError("Please sign in again."); return; }
+    if (!token) {
+      setBusy(false);
+      setError("Please sign in again.");
+      return;
+    }
 
-    const res = await fetch(`/api/influencer/promos/${encodeURIComponent(promo.id)}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${token}` },
-      credentials: "include",
-    });
-    const j = await res.json().catch(()=>({}));
+    const res = await fetch(
+      `/api/influencer/promos/${encodeURIComponent(promo.id)}`,
+      {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+      }
+    );
+    const j = await res.json().catch(() => ({}));
 
     setBusy(false);
     if (!res.ok || j?.ok === false) {
@@ -1056,11 +1450,21 @@ function DeletePromoModal({
   return (
     <Modal title="Delete promo" onClose={onClose}>
       <div className="space-y-3 text-sm">
-        <p>Are you sure you want to delete <strong>{promo.code}</strong>? This can’t be undone.</p>
-        {error && <div className="rounded-md bg-red-50 px-2 py-1 text-xs text-red-700">{error}</div>}
+        <p>
+          Are you sure you want to delete <strong>{promo.code}</strong>? This
+          can’t be undone.
+        </p>
+        {error && (
+          <div className="rounded-md bg-red-50 px-2 py-1 text-xs text-red-700">
+            {error}
+          </div>
+        )}
 
         <div className="mt-2 flex gap-2">
-          <button onClick={onClose} className="inline-flex w-full items-center justify-center gap-2 rounded-lg border bg-neutral-50 px-4 py-2 font-semibold">
+          <button
+            onClick={onClose}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg border bg-neutral-50 px-4 py-2 font-semibold"
+          >
             <X className="h-4 w-4" /> Cancel
           </button>
           <button
@@ -1068,7 +1472,11 @@ function DeletePromoModal({
             disabled={busy}
             className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2 font-semibold text-white disabled:opacity-60"
           >
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+            {busy ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Trash2 className="h-4 w-4" />
+            )}
             Delete
           </button>
         </div>
@@ -1078,7 +1486,17 @@ function DeletePromoModal({
 }
 
 /* ---------- Small atoms ---------- */
-function StatCard({ loading, icon, label, value }: { loading: boolean; icon: React.ReactNode; label: string; value: string; }) {
+function StatCard({
+  loading,
+  icon,
+  label,
+  value,
+}: {
+  loading: boolean;
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+}) {
   return (
     <div className="rounded-2xl border bg-white p-4 shadow-sm">
       <div className="flex items-center gap-2 text-neutral-700">
@@ -1086,13 +1504,17 @@ function StatCard({ loading, icon, label, value }: { loading: boolean; icon: Rea
         <div className="text-xs">{label}</div>
       </div>
       <div className="mt-2 text-lg font-bold">
-        {loading ? <span className="inline-block h-5 w-24 animate-pulse rounded bg-neutral-100" /> : value}
+        {loading ? (
+          <span className="inline-block h-5 w-24 animate-pulse rounded bg-neutral-100" />
+        ) : (
+          value
+        )}
       </div>
     </div>
   );
 }
 
-function EmptyState({ title, desc }: { title: string; desc: string; }) {
+function EmptyState({ title, desc }: { title: string; desc: string }) {
   return (
     <div className="rounded-xl border bg-neutral-50 p-4 text-center">
       <div className="text-sm font-semibold">{title}</div>
@@ -1122,6 +1544,13 @@ function ListSkeleton() {
 
 function toINR(n: number, currency?: string | null) {
   const code = (currency || "INR").toUpperCase();
-  try { return n.toLocaleString("en-IN", { style: "currency", currency: code, maximumFractionDigits: 0 }); }
-  catch { return `${code === "INR" ? "₹" : code + " "}${Math.round(n)}`; }
+  try {
+    return n.toLocaleString("en-IN", {
+      style: "currency",
+      currency: code,
+      maximumFractionDigits: 0,
+    });
+  } catch {
+    return `${code === "INR" ? "₹" : code + " "}${Math.round(n)}`;
+  }
 }

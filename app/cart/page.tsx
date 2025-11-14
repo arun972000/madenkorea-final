@@ -18,6 +18,7 @@ import { useCart } from "@/lib/contexts/CartContext";
 import { useAuth } from "@/lib/contexts/AuthContext";
 import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
+import Image from "next/image";
 
 type ProductRow = {
   id: string;
@@ -342,73 +343,89 @@ export default function CartPage() {
               return (
                 <Card key={row.id}>
                   <CardContent className="p-6">
-                    {/* Thumbnail removed; compact two-column layout */}
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="min-w-0 flex-1">
-                        <Link
-                          href={`/p/${p.slug}`}
-                          className="hover:text-primary"
-                        >
-                          <h3 className="font-semibold mb-1 line-clamp-2">
-                            {p.name}
-                          </h3>
-                        </Link>
-                        {p.brands?.name && (
-                          <p className="text-sm text-muted-foreground mb-1">
-                            {p.brands.name}
-                          </p>
-                        )}
-                        <div className="flex items-baseline gap-2">
-                          <span className="font-bold">
-                            {formatINR(row.unitPrice, p.currency)}
-                          </span>
-                          {row.mrp && (
-                            <span className="text-sm text-muted-foreground line-through">
-                              {formatINR(row.mrp, p.currency)}
-                            </span>
-                          )}
-                        </div>
-                        {/* Per-item promo/discount/commission details removed */}
-                      </div>
+  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    {/* LEFT: image + details */}
+    <div className="min-w-0 flex-1 flex items-start gap-3 sm:gap-4">
+      {/* Thumbnail */}
+      <Link
+        href={`/p/${p.slug}`}
+        className="block h-20 w-20 flex-shrink-0 overflow-hidden rounded-md border bg-muted"
+      >
+        {p.hero_image_url ? (
+          <Image
+            src={p.hero_image_url}
+            alt={p.name ?? 'Product image'}
+            width={80}
+            height={80}
+            loading="lazy"
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
+            No image
+          </div>
+        )}
+      </Link>
 
-                      <div className="flex items-center justify-between sm:justify-end gap-3">
-                        <div className="flex items-center border rounded-lg">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() =>
-                              setQty(row.id, Math.max(0, row.quantity - 1))
-                            }
-                          >
-                            -
-                          </Button>
-                          <span className="px-3 py-1 min-w-[2.5rem] text-center">
-                            {row.quantity}
-                          </span>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setQty(row.id, row.quantity + 1)}
-                          >
-                            +
-                          </Button>
-                        </div>
+      {/* Details */}
+      <div className="min-w-0">
+        <Link href={`/p/${p.slug}`} className="hover:text-primary">
+          <h3 className="font-semibold mb-1 line-clamp-2">{p.name}</h3>
+        </Link>
+        {p.brands?.name && (
+          <p className="text-sm text-muted-foreground mb-1">{p.brands.name}</p>
+        )}
+        <div className="flex items-baseline gap-2">
+          <span className="font-bold">
+            {formatINR(row.unitPrice, p.currency)}
+          </span>
+          {row.mrp && (
+            <span className="text-sm text-muted-foreground line-through">
+              {formatINR(row.mrp, p.currency)}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
 
-                        <p className="font-semibold whitespace-nowrap">
-                          {formatINR(row.lineTotal, p.currency)}
-                        </p>
+    {/* RIGHT: qty, line total, remove */}
+    <div className="flex items-center justify-between sm:justify-end gap-3">
+      <div className="flex items-center border rounded-lg">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setQty(row.id, Math.max(0, row.quantity - 1))}
+        >
+          -
+        </Button>
+        <span className="px-3 py-1 min-w-[2.5rem] text-center">
+          {row.quantity}
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setQty(row.id, row.quantity + 1)}
+        >
+          +
+        </Button>
+      </div>
 
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => removeItem(row.id)}
-                          title="Remove"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  </CardContent>
+      <p className="font-semibold whitespace-nowrap">
+        {formatINR(row.lineTotal, p.currency)}
+      </p>
+
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={() => removeItem(row.id)}
+        title="Remove"
+      >
+        <Trash2 className="h-4 w-4" />
+      </Button>
+    </div>
+  </div>
+</CardContent>
+
                 </Card>
               );
             })}
