@@ -4,8 +4,19 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import {
-  ArrowRight, Sparkles, Gift, LineChart, ShieldCheck, Percent, Clock, X,
-  BadgeCheck, Users2, Star, HelpCircle, ChevronDown
+  ArrowRight,
+  Sparkles,
+  Gift,
+  LineChart,
+  ShieldCheck,
+  Percent,
+  Clock,
+  X,
+  BadgeCheck,
+  Users2,
+  Star,
+  HelpCircle,
+  ChevronDown,
 } from "lucide-react";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
@@ -17,7 +28,9 @@ export default function PartnerProgramPage() {
   const supabase = createClientComponentClient();
 
   // auth + status
-  const [authState, setAuthState] = useState<"checking" | "authed" | "anon">("checking");
+  const [authState, setAuthState] = useState<"checking" | "authed" | "anon">(
+    "checking"
+  );
   const [status, setStatus] = useState<Status>("none");
   const [requestedAt, setRequestedAt] = useState<string | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
@@ -35,12 +48,14 @@ export default function PartnerProgramPage() {
   useEffect(() => {
     let mounted = true;
     (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       if (!mounted) return;
 
       if (!session?.access_token) {
+        // No redirect – just mark as anonymous
         setAuthState("anon");
-        router.replace("/auth/login?redirect=/influencer-request");
         return;
       }
 
@@ -58,18 +73,23 @@ export default function PartnerProgramPage() {
       setAuthState("authed");
     })();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_e, s) => {
       setAuthState(s ? "authed" : "anon");
     });
     return () => subscription.unsubscribe();
-  }, [supabase, router]);
+  }, [supabase]);
 
   useEffect(() => {
     if (authState !== "authed") return;
     let cancel = false;
     (async () => {
-      setStatusLoading(true); setErr(null);
-      const { data: { session } } = await supabase.auth.getSession();
+      setStatusLoading(true);
+      setErr(null);
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       if (!session?.access_token) return;
 
       const res = await fetch(`/api/influencer/status?t=${Date.now()}`, {
@@ -86,32 +106,45 @@ export default function PartnerProgramPage() {
       }
       setStatusLoading(false);
     })();
-    return () => { cancel = true; };
+    return () => {
+      cancel = true;
+    };
   }, [authState, supabase]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setMsg(null); setErr(null); setSubmitting(true);
+    setMsg(null);
+    setErr(null);
+    setSubmitting(true);
 
-    const { data: { session } } = await supabase.auth.getSession();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
     if (!session?.access_token) {
+      // No redirect – just show a message and keep user on this page
       setSubmitting(false);
-      router.replace("/auth/login?redirect=/influencer-request");
+      setAuthState("anon");
+      setErr("Please log in to submit a partner request.");
       return;
     }
 
     try {
       const res = await fetch("/api/influencer/request", {
         method: "POST",
-        headers: { "content-type": "application/json", Authorization: `Bearer ${session.access_token}` },
+        headers: {
+          "content-type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
         credentials: "include",
         body: JSON.stringify({ handle, note, social: {} }),
       });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok || j?.ok === false) setErr(j?.error || "Failed to submit. Please try again.");
+      if (!res.ok || j?.ok === false)
+        setErr(j?.error || "Failed to submit. Please try again.");
       else {
         setMsg(j?.message || "Request submitted.");
-        setHandle(""); setNote("");
+        setHandle("");
+        setNote("");
         setStatus("pending");
         setRequestedAt(new Date().toISOString());
         setOpen(false);
@@ -123,293 +156,458 @@ export default function PartnerProgramPage() {
     }
   }
 
-  if (authState !== "authed") {
+  // While checking auth, just show a lightweight loading state
+  if (authState === "checking") {
     return (
-      <div className="min-h-[60vh] grid place-items-center">
-        <div className="text-sm text-neutral-600">Loading…</div>
-      </div>
+      <>
+        <Header />
+        <div className="min-h-[60vh] grid place-items-center">
+          <div className="text-sm text-neutral-600">Loading…</div>
+        </div>
+        <Footer />
+      </>
     );
   }
 
+  // If NOT logged in: show login CTA and hide portal / request UI
+  if (authState === "anon") {
+    return (
+      <>
+        <Header />
+        <main className="min-h-[70vh] bg-[radial-gradient(60%_60%_at_20%_-10%,#FDECEC,transparent),radial-gradient(40%_50%_at_100%_0%,#E8F7FF,transparent)] flex items-center justify-center px-4">
+          <div className="w-full max-w-md rounded-3xl border bg-white/80 p-6 shadow-xl backdrop-blur text-center">
+            <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-rose-50 text-rose-700">
+              <Sparkles className="h-5 w-5" />
+            </div>
+            <h1 className="text-xl font-semibold">
+              Sign in to access the partner program
+            </h1>
+            <p className="mt-2 text-sm text-neutral-600">
+              You need an account to view your partner portal and submit an
+              application.
+            </p>
+            <div className="mt-5 flex flex-col gap-2">
+              <button
+                onClick={() =>
+                  router.push("/auth/login?redirect=/influencer-request")
+                }
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-black px-5 py-3 text-sm font-semibold text-white hover:bg-black/90"
+              >
+                Login to access <ArrowRight className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => router.push("/")}
+                className="rounded-xl border border-neutral-300 px-5 py-3 text-sm font-semibold hover:bg-white"
+              >
+                Back to home
+              </button>
+            </div>
+          </div>
+        </main>
+        <Footer />
+      </>
+    );
+  }
+
+  // ========== LOGGED-IN VIEW (unchanged portal / request UI) ==========
   return (
     <>
-    <Header/>
-    
-    <div className="min-h-screen bg-[radial-gradient(60%_60%_at_20%_-10%,#FDECEC,transparent),radial-gradient(40%_50%_at_100%_0%,#E8F7FF,transparent)] text-neutral-900">
-      {/* ============ HERO — Consumer Innovations banner ============ */}
-      <section className="relative isolate">
-        {/* Soft skincare-inspired image with airy gradient */}
-        <div
-          className="absolute inset-0 -z-10 bg-cover bg-center"
-          style={{
-            backgroundImage:
-              "url('https://images.unsplash.com/photo-1616394584738-fc6e612b1df9?q=80&w=1920&auto=format&fit=crop')",
-          }}
-        />
-        <div className="absolute inset-0 -z-10 bg-gradient-to-b from-white/70 via-white/40 to-white/10" />
-        <div className="pointer-events-none absolute inset-0 -z-10 mix-blend-overlay [background:radial-gradient(60%_60%_at_50%_0%,rgba(255,255,255,0.2),rgba(255,255,255,0))]" />
+      <Header />
 
-        <div className="mx-auto max-w-6xl px-4 py-14 sm:py-16">
-          <div className="rounded-3xl border border-white/60 bg-white/70 p-6 shadow-2xl backdrop-blur">
-            <div className="flex items-start gap-4">
-              <div className="rounded-2xl bg-white/70 p-2 text-rose-700">
-                <Sparkles className="h-6 w-6" />
-              </div>
-              <div className="flex-1">
-                <p className="inline-flex items-center gap-2 rounded-full bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700">
-                  Made in Korea • Global codes • Consumer innovations
-                </p>
-                <h1 className="mt-3 text-3xl font-extrabold tracking-tight sm:text-4xl">
-                  Partner with us. Share consumer innovations from Korea. Earn more.
-                </h1>
-                <p className="mt-2 text-sm text-neutral-700">
-                  Join our creator circle for Korean skincare and wellness. Your audience gets a discount and you earn
-                  commission — together capped at <strong>20% per product</strong> by default for fairness.
-                </p>
+      <div className="min-h-screen bg-[radial-gradient(60%_60%_at_20%_-10%,#FDECEC,transparent),radial-gradient(40%_50%_at_100%_0%,#E8F7FF,transparent)] text-neutral-900">
+        {/* ============ HERO — Consumer Innovations banner ============ */}
+        <section className="relative isolate">
+          {/* Soft skincare-inspired image with airy gradient */}
+          <div
+            className="absolute inset-0 -z-10 bg-cover bg-center"
+            style={{
+              backgroundImage:
+                "url('https://images.unsplash.com/photo-1616394584738-fc6e612b1df9?q=80&w=1920&auto=format&fit=crop')",
+            }}
+          />
+          <div className="absolute inset-0 -z-10 bg-gradient-to-b from-white/70 via-white/40 to-white/10" />
+          <div className="pointer-events-none absolute inset-0 -z-10 mix-blend-overlay [background:radial-gradient(60%_60%_at_50%_0%,rgba(255,255,255,0.2),rgba(255,255,255,0))]" />
 
-                <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-                  {isApproved ? (
-                    <button
-                      onClick={() => router.push("/influencer")}
-                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 text-sm font-semibold text-white hover:bg-emerald-400"
-                    >
-                      Visit partner portal <ArrowRight className="h-4 w-4" />
-                    </button>
-                  ) : status === "pending" ? (
-                    <span className="inline-flex items-center justify-center rounded-xl bg-amber-300/90 px-4 py-3 text-sm font-semibold text-amber-900">
-                      Pending review
-                    </span>
-                  ) : (
-                    <button
-                      onClick={() => setOpen(true)}
-                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-black px-5 py-3 text-sm font-semibold text-white hover:bg-black/90"
-                    >
-                      Become a partner <ArrowRight className="h-4 w-4" />
-                    </button>
-                  )}
+          <div className="mx-auto max-w-6xl px-4 py-14 sm:py-16">
+            <div className="rounded-3xl border border-white/60 bg-white/70 p-6 shadow-2xl backdrop-blur">
+              <div className="flex items-start gap-4">
+                <div className="rounded-2xl bg-white/70 p-2 text-rose-700">
+                  <Sparkles className="h-6 w-6" />
+                </div>
+                <div className="flex-1">
+                  <p className="inline-flex items-center gap-2 rounded-full bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700">
+                    Made in Korea • Global codes • Consumer innovations
+                  </p>
+                  <h1 className="mt-3 text-3xl font-extrabold tracking-tight sm:text-4xl">
+                    Partner with us. Share consumer innovations from Korea. Earn
+                    more.
+                  </h1>
+                  <p className="mt-2 text-sm text-neutral-700">
+                    Join our creator circle for Korean skincare and wellness.
+                    Your audience gets a discount and you earn commission —
+                    together capped at <strong>20% per product</strong> by
+                    default for fairness.
+                  </p>
 
-                  {!isApproved && (
-                    <button
-                      onClick={() => router.push("/")}
-                      className="rounded-xl border border-neutral-300 px-5 py-3 text-sm font-semibold hover:bg-white"
-                    >
-                      Explore catalog
-                    </button>
-                  )}
+                  <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                    {isApproved ? (
+                      <button
+                        onClick={() => router.push("/influencer")}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 text-sm font-semibold text-white hover:bg-emerald-400"
+                      >
+                        Visit partner portal{" "}
+                        <ArrowRight className="h-4 w-4" />
+                      </button>
+                    ) : status === "pending" ? (
+                      <span className="inline-flex items-center justify-center rounded-xl bg-amber-300/90 px-4 py-3 text-sm font-semibold text-amber-900">
+                        Pending review
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => setOpen(true)}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-black px-5 py-3 text-sm font-semibold text-white hover:bg-black/90"
+                      >
+                        Become a partner{" "}
+                        <ArrowRight className="h-4 w-4" />
+                      </button>
+                    )}
+
+                    {!isApproved && (
+                      <button
+                        onClick={() => router.push("/")}
+                        className="rounded-xl border border-neutral-300 px-5 py-3 text-sm font-semibold hover:bg-white"
+                      >
+                        Explore catalog
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Quick feature chips */}
-            <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-4">
-              <Chip icon={<Percent className="h-4 w-4" />} title="Fair & simple" desc="Your % + buyer % ≤ 20% cap." />
-              <Chip icon={<Gift className="h-4 w-4" />} title="Global code" desc="One code across the cart." />
-              <Chip icon={<LineChart className="h-4 w-4" />} title="Live tracking" desc="Clicks, orders & payouts." />
-              <Chip icon={<ShieldCheck className="h-4 w-4" />} title="Auto-enforced" desc="Caps handled at checkout." />
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Wave divider */}
-      <div className="relative h-10 -mt-6 overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-white to-transparent [mask-image:radial-gradient(120%_50%_at_50%_-10%,black,transparent)]" />
-      </div>
-
-      {/* ============ SECTIONS (feel-good, minimal) ============ */}
-
-      {/* A. Steps */}
-      <section className="mx-auto max-w-6xl px-4">
-        <h2 className="mb-3 text-lg font-semibold">How it works</h2>
-        <ol className="grid grid-cols-1 gap-4 sm:grid-cols-4">
-          <Step n={1} title="Apply" desc="Tell us your handle & niche." color="bg-rose-100 text-rose-700" />
-          <Step n={2} title="Approval" desc="We activate your portal." color="bg-amber-100 text-amber-700" />
-          <Step n={3} title="Share" desc="Links + global promo code." color="bg-sky-100 text-sky-700" />
-          <Step n={4} title="Earn" desc="Commission on eligible sales." color="bg-emerald-100 text-emerald-700" />
-        </ol>
-      </section>
-
-      {/* Pending ribbon */}
-      {!isApproved && !statusLoading && status === "pending" && (
-        <section className="mx-auto mt-4 max-w-6xl px-4">
-          <div className="rounded-2xl border bg-amber-50 p-4 text-amber-900">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <Clock className="h-4 w-4" />
-              Application received
-            </div>
-            <p className="mt-1 text-xs">
-              Submitted on {requestedAt ? new Date(requestedAt).toLocaleString() : "—"}.
-              We usually review within 1–2 business days.
-            </p>
-            <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[11px]">
-              <span className="rounded-lg bg-white/70 px-2 py-1">Submitted ✓</span>
-              <span className="rounded-lg bg-white/70 px-2 py-1">Reviewing …</span>
-              <span className="rounded-lg bg-white/70 px-2 py-1">Decision → Email</span>
+              {/* Quick feature chips */}
+              <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-4">
+                <Chip
+                  icon={<Percent className="h-4 w-4" />}
+                  title="Fair & simple"
+                  desc="Your % + buyer % ≤ 20% cap."
+                />
+                <Chip
+                  icon={<Gift className="h-4 w-4" />}
+                  title="Global code"
+                  desc="One code across the cart."
+                />
+                <Chip
+                  icon={<LineChart className="h-4 w-4" />}
+                  title="Live tracking"
+                  desc="Clicks, orders & payouts."
+                />
+                <Chip
+                  icon={<ShieldCheck className="h-4 w-4" />}
+                  title="Auto-enforced"
+                  desc="Caps handled at checkout."
+                />
+              </div>
             </div>
           </div>
         </section>
-      )}
 
-      {/* B. Trust stats */}
-      <section className="mx-auto mt-6 max-w-6xl px-4">
-        <div className="rounded-2xl border p-5">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <Stat icon={<Users2 className="h-5 w-5" />} label="Creators active" value="2,400+" />
-            <Stat icon={<Star className="h-5 w-5" />} label="Avg. payout rating" value="4.9/5" />
-            <Stat icon={<BadgeCheck className="h-5 w-5" />} label="Approval time" value="~24–48h" />
-          </div>
+        {/* Wave divider */}
+        <div className="relative h-10 -mt-6 overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-b from-white to-transparent [mask-image:radial-gradient(120%_50%_at_50%_-10%,black,transparent)]" />
         </div>
-      </section>
 
-      {/* (REMOVED) C. Product collections carousel — per request */}
+        {/* ============ SECTIONS (feel-good, minimal) ============ */}
 
-      {/* D. Benefits grid */}
-      <section className="mx-auto mt-6 max-w-6xl px-4">
-        <h2 className="mb-3 text-lg font-semibold">Why creators love it</h2>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <Card
-            icon={<BadgeCheck className="h-5 w-5" />}
-            title="Consumer innovations"
-            desc="Thoughtfully curated formulas and routines your audience trusts."
-            gradient="from-rose-100 to-fuchsia-50"
-          />
-          <Card
-            icon={<LineChart className="h-5 w-5" />}
-            title="Real-time insights"
-            desc="Transparent performance, attribution, and payout history."
-            gradient="from-sky-100 to-indigo-50"
-          />
-          <Card
-            icon={<ShieldCheck className="h-5 w-5" />}
-            title="Hassle-free"
-            desc="Per-product caps auto-enforced. You focus on creating."
-            gradient="from-emerald-100 to-teal-50"
-          />
-        </div>
-      </section>
-
-      {/* E. FAQ */}
-      <section className="mx-auto mt-6 max-w-6xl px-4 pb-16">
-        <h2 className="mb-3 text-lg font-semibold">FAQ</h2>
-        <div className="rounded-2xl border">
-          <FaqItem q="What does the “20% cap” mean?"
-                   a="Customer discount + your commission together won’t exceed 20% per product by default. If a product has a lower cap, checkout clamps the split automatically." />
-          <FaqItem q="Is my promo code global?"
-                   a="Yes. Your code is cart-wide, while caps are enforced per item at checkout to keep things fair." />
-          <FaqItem q="When are payouts processed?"
-                   a="We batch commissions regularly; you’ll see pending/paid status and payout history in your portal." />
-        </div>
-      </section>
-
-      {/* Application modal */}
-      {open && !isApproved && status !== "pending" && (
-        <div
-          aria-modal="true"
-          role="dialog"
-          className="fixed inset-0 z-50 grid place-items-end sm:place-items-center"
-          onClick={() => setOpen(false)}
-        >
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" aria-hidden="true" />
-          <div
-            className="relative z-10 w-full max-w-md rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl sm:p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Become a partner</h3>
-              <button className="rounded p-1 hover:bg-neutral-100" onClick={() => setOpen(false)} aria-label="Close">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <p className="mb-3 text-sm text-neutral-600">
-              Tell us your public handle and a short note about your content. We’ll review and email you.
-            </p>
-
-            <label className="mb-1 block text-xs font-medium">Public handle (optional)</label>
-            <input
-              className="mb-3 w-full rounded-lg border px-3 py-2 text-sm"
-              placeholder="e.g. glowwithjin"
-              value={handle}
-              onChange={(e) => setHandle(e.target.value)}
+        {/* A. Steps */}
+        <section className="mx-auto max-w-6xl px-4">
+          <h2 className="mb-3 text-lg font-semibold">How it works</h2>
+          <ol className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+            <Step
+              n={1}
+              title="Apply"
+              desc="Tell us your handle & niche."
+              color="bg-rose-100 text-rose-700"
             />
-            <label className="mb-1 block text-xs font-medium">Note</label>
-            <textarea
-              rows={4}
-              className="w-full rounded-lg border px-3 py-2 text-sm"
-              placeholder="What do you create? Who’s your audience?"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
+            <Step
+              n={2}
+              title="Approval"
+              desc="We activate your portal."
+              color="bg-amber-100 text-amber-700"
             />
+            <Step
+              n={3}
+              title="Share"
+              desc="Links + global promo code."
+              color="bg-sky-100 text-sky-700"
+            />
+            <Step
+              n={4}
+              title="Earn"
+              desc="Commission on eligible sales."
+              color="bg-emerald-100 text-emerald-700"
+            />
+          </ol>
+        </section>
 
-            <div className="mt-4 grid gap-2 sm:grid-cols-2">
-              <button
-                onClick={submit}
-                disabled={submitting}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-black px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
-              >
-                {submitting ? "Submitting…" : "Submit request"}
-              </button>
-              <button onClick={() => setOpen(false)} className="rounded-xl border px-4 py-2.5 text-sm font-semibold">Cancel</button>
+        {/* Pending ribbon */}
+        {!isApproved && !statusLoading && status === "pending" && (
+          <section className="mx-auto mt-4 max-w-6xl px-4">
+            <div className="rounded-2xl border bg-amber-50 p-4 text-amber-900">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <Clock className="h-4 w-4" />
+                Application received
+              </div>
+              <p className="mt-1 text-xs">
+                Submitted on{" "}
+                {requestedAt
+                  ? new Date(requestedAt).toLocaleString()
+                  : "—"}
+                . We usually review within 1–2 business days.
+              </p>
+              <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[11px]">
+                <span className="rounded-lg bg-white/70 px-2 py-1">
+                  Submitted ✓
+                </span>
+                <span className="rounded-lg bg-white/70 px-2 py-1">
+                  Reviewing …
+                </span>
+                <span className="rounded-lg bg-white/70 px-2 py-1">
+                  Decision → Email
+                </span>
+              </div>
             </div>
+          </section>
+        )}
 
-            <p className="mt-3 text-[11px] text-neutral-500">
-              Global codes apply cart-wide; per-product caps (default 20%) auto-enforced at checkout.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Inline form (fallback) */}
-      {!isApproved && !statusLoading && (status === "none" || status === "rejected") && !open && (
-        <section className="mx-auto mt-2 max-w-6xl px-4 pb-16">
+        {/* B. Trust stats */}
+        <section className="mx-auto mt-6 max-w-6xl px-4">
           <div className="rounded-2xl border p-5">
-            <div className="flex items-center justify-between">
-              <h2 className="text-base font-semibold">Apply now</h2>
-              <button onClick={() => setOpen(true)} className="text-sm font-medium underline">Open as modal</button>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <Stat
+                icon={<Users2 className="h-5 w-5" />}
+                label="Creators active"
+                value="2,400+"
+              />
+              <Stat
+                icon={<Star className="h-5 w-5" />}
+                label="Avg. payout rating"
+                value="4.9/5"
+              />
+              <Stat
+                icon={<BadgeCheck className="h-5 w-5" />}
+                label="Approval time"
+                value="~24–48h"
+              />
             </div>
-            <form onSubmit={submit} className="mt-4 grid grid-cols-1 gap-4">
-              <div>
-                <label className="mb-1 block text-xs font-medium">Public handle (optional)</label>
-                <input className="w-full rounded-lg border px-3 py-2 text-sm"
-                       value={handle} onChange={(e)=>setHandle(e.target.value)} placeholder="e.g. glowwithjin" />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium">Note</label>
-                <textarea rows={4} className="w-full rounded-lg border px-3 py-2 text-sm"
-                          value={note} onChange={(e)=>setNote(e.target.value)} placeholder="Tell us briefly about your content and audience" />
-              </div>
-              <button type="submit" disabled={submitting}
-                      className="w-full rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white disabled:opacity-60">
-                {submitting ? "Submitting…" : "Submit request"}
-              </button>
-            </form>
           </div>
         </section>
-      )}
 
-      {(msg || err) && (
-        <div
-          className="fixed bottom-3 left-0 right-0 mx-auto w-[92%] max-w-md rounded-lg border p-3 text-sm shadow"
-          style={{
-            background: msg ? "#ecfdf5" : "#fef2f2",
-            borderColor: msg ? "#a7f3d0" : "#fecaca",
-            color: msg ? "#065f46" : "#991b1b",
-          }}
-        >
-          {msg || err}
-        </div>
-      )}
-    </div>
-    <Footer/>
+        {/* D. Benefits grid */}
+        <section className="mx-auto mt-6 max-w-6xl px-4">
+          <h2 className="mb-3 text-lg font-semibold">Why creators love it</h2>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <Card
+              icon={<BadgeCheck className="h-5 w-5" />}
+              title="Consumer innovations"
+              desc="Thoughtfully curated formulas and routines your audience trusts."
+              gradient="from-rose-100 to-fuchsia-50"
+            />
+            <Card
+              icon={<LineChart className="h-5 w-5" />}
+              title="Real-time insights"
+              desc="Transparent performance, attribution, and payout history."
+              gradient="from-sky-100 to-indigo-50"
+            />
+            <Card
+              icon={<ShieldCheck className="h-5 w-5" />}
+              title="Hassle-free"
+              desc="Per-product caps auto-enforced. You focus on creating."
+              gradient="from-emerald-100 to-teal-50"
+            />
+          </div>
+        </section>
+
+        {/* E. FAQ */}
+        <section className="mx-auto mt-6 max-w-6xl px-4 pb-16">
+          <h2 className="mb-3 text-lg font-semibold">FAQ</h2>
+          <div className="rounded-2xl border">
+            <FaqItem
+              q="What does the “20% cap” mean?"
+              a="Customer discount + your commission together won’t exceed 20% per product by default. If a product has a lower cap, checkout clamps the split automatically."
+            />
+            <FaqItem
+              q="Is my promo code global?"
+              a="Yes. Your code is cart-wide, while caps are enforced per item at checkout to keep things fair."
+            />
+            <FaqItem
+              q="When are payouts processed?"
+              a="We batch commissions regularly; you’ll see pending/paid status and payout history in your portal."
+            />
+          </div>
+        </section>
+
+        {/* Application modal */}
+        {open && !isApproved && status !== "pending" && (
+          <div
+            aria-modal="true"
+            role="dialog"
+            className="fixed inset-0 z-50 grid place-items-end sm:place-items-center"
+            onClick={() => setOpen(false)}
+          >
+            <div
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+              aria-hidden="true"
+            />
+            <div
+              className="relative z-10 w-full max-w-md rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl sm:p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-2 flex items-center justify-between">
+                <h3 className="text-lg font-semibold">Become a partner</h3>
+                <button
+                  className="rounded p-1 hover:bg-neutral-100"
+                  onClick={() => setOpen(false)}
+                  aria-label="Close"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <p className="mb-3 text-sm text-neutral-600">
+                Tell us your public handle and a short note about your content.
+                We’ll review and email you.
+              </p>
+
+              <label className="mb-1 block text-xs font-medium">
+                Public handle (optional)
+              </label>
+              <input
+                className="mb-3 w-full rounded-lg border px-3 py-2 text-sm"
+                placeholder="e.g. glowwithjin"
+                value={handle}
+                onChange={(e) => setHandle(e.target.value)}
+              />
+              <label className="mb-1 block text-xs font-medium">Note</label>
+              <textarea
+                rows={4}
+                className="w-full rounded-lg border px-3 py-2 text-sm"
+                placeholder="What do you create? Who’s your audience?"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+              />
+
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                <button
+                  onClick={submit}
+                  disabled={submitting}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-black px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+                >
+                  {submitting ? "Submitting…" : "Submit request"}
+                </button>
+                <button
+                  onClick={() => setOpen(false)}
+                  className="rounded-xl border px-4 py-2.5 text-sm font-semibold"
+                >
+                  Cancel
+                </button>
+              </div>
+
+              <p className="mt-3 text-[11px] text-neutral-500">
+                Global codes apply cart-wide; per-product caps (default 20%)
+                auto-enforced at checkout.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Inline form (fallback) */}
+        {!isApproved &&
+          !statusLoading &&
+          (status === "none" || status === "rejected") &&
+          !open && (
+            <section className="mx-auto mt-2 max-w-6xl px-4 pb-16">
+              <div className="rounded-2xl border p-5">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-base font-semibold">Apply now</h2>
+                  <button
+                    onClick={() => setOpen(true)}
+                    className="text-sm font-medium underline"
+                  >
+                    Open as modal
+                  </button>
+                </div>
+                <form
+                  onSubmit={submit}
+                  className="mt-4 grid grid-cols-1 gap-4"
+                >
+                  <div>
+                    <label className="mb-1 block text-xs font-medium">
+                      Public handle (optional)
+                    </label>
+                    <input
+                      className="w-full rounded-lg border px-3 py-2 text-sm"
+                      value={handle}
+                      onChange={(e) => setHandle(e.target.value)}
+                      placeholder="e.g. glowwithjin"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium">
+                      Note
+                    </label>
+                    <textarea
+                      rows={4}
+                      className="w-full rounded-lg border px-3 py-2 text-sm"
+                      value={note}
+                      onChange={(e) => setNote(e.target.value)}
+                      placeholder="Tell us briefly about your content and audience"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="w-full rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                  >
+                    {submitting ? "Submitting…" : "Submit request"}
+                  </button>
+                </form>
+              </div>
+            </section>
+          )}
+
+        {(msg || err) && (
+          <div
+            className="fixed bottom-3 left-0 right-0 mx-auto w-[92%] max-w-md rounded-lg border p-3 text-sm shadow"
+            style={{
+              background: msg ? "#ecfdf5" : "#fef2f2",
+              borderColor: msg ? "#a7f3d0" : "#fecaca",
+              color: msg ? "#065f46" : "#991b1b",
+            }}
+          >
+            {msg || err}
+          </div>
+        )}
+      </div>
+      <Footer />
     </>
   );
 }
 
 /* ---------- Atoms ---------- */
-function Chip({ icon, title, desc }: { icon: React.ReactNode; title: string; desc: string }) {
+function Chip({
+  icon,
+  title,
+  desc,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  desc: string;
+}) {
   return (
     <div className="rounded-2xl border border-white/60 bg-white/70 p-3">
       <div className="flex items-center gap-2">
-        <div className="rounded-md bg-white p-1.5 text-rose-700">{icon}</div>
+        <div className="rounded-md bg-white p-1.5 text-rose-700">
+          {icon}
+        </div>
         <div className="text-sm font-semibold">{title}</div>
       </div>
       <p className="mt-1 text-xs text-neutral-700">{desc}</p>
@@ -417,10 +615,22 @@ function Chip({ icon, title, desc }: { icon: React.ReactNode; title: string; des
   );
 }
 
-function Step({ n, title, desc, color }: { n: number; title: string; desc: string; color: string }) {
+function Step({
+  n,
+  title,
+  desc,
+  color,
+}: {
+  n: number;
+  title: string;
+  desc: string;
+  color: string;
+}) {
   return (
     <li className="relative rounded-2xl border bg-white p-4 shadow-sm">
-      <div className={`mb-2 inline-flex h-7 w-7 items-center justify-center rounded-full ${color} text-xs font-bold`}>
+      <div
+        className={`mb-2 inline-flex h-7 w-7 items-center justify-center rounded-full ${color} text-xs font-bold`}
+      >
         {n}
       </div>
       <div className="text-sm font-semibold">{title}</div>
@@ -429,7 +639,17 @@ function Step({ n, title, desc, color }: { n: number; title: string; desc: strin
   );
 }
 
-function Card({ icon, title, desc, gradient }: { icon: React.ReactNode; title: string; desc: string; gradient: string }) {
+function Card({
+  icon,
+  title,
+  desc,
+  gradient,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  desc: string;
+  gradient: string;
+}) {
   return (
     <div className={`rounded-2xl border bg-gradient-to-br ${gradient} p-4`}>
       <div className="flex items-center gap-2">
@@ -441,7 +661,15 @@ function Card({ icon, title, desc, gradient }: { icon: React.ReactNode; title: s
   );
 }
 
-function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+function Stat({
+  icon,
+  label,
+  value,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+}) {
   return (
     <div className="flex items-center gap-3 rounded-xl border bg-white p-4">
       <div className="rounded-md bg-neutral-50 p-2">{icon}</div>
@@ -456,11 +684,23 @@ function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; va
 function FaqItem({ q, a }: { q: string; a: string }) {
   const [open, setOpen] = useState(false);
   return (
-    <details open={open} onToggle={(e)=>setOpen((e.target as HTMLDetailsElement).open)}
-             className="group border-b last:border-none">
+    <details
+      open={open}
+      onToggle={(e) =>
+        setOpen((e.target as HTMLDetailsElement).open)
+      }
+      className="group border-b last:border-none"
+    >
       <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm">
-        <span className="flex items-center gap-2"><HelpCircle className="h-4 w-4 text-neutral-500"/>{q}</span>
-        <ChevronDown className={`h-4 w-4 text-neutral-500 transition-transform ${open ? "rotate-180" : ""}`} />
+        <span className="flex items-center gap-2">
+          <HelpCircle className="h-4 w-4 text-neutral-500" />
+          {q}
+        </span>
+        <ChevronDown
+          className={`h-4 w-4 text-neutral-500 transition-transform ${
+            open ? "rotate-180" : ""
+          }`}
+        />
       </summary>
       <div className="px-4 pb-4 text-xs text-neutral-600">{a}</div>
     </details>
