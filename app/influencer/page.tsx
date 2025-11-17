@@ -63,6 +63,9 @@ type WalletData = {
   } | null;
 };
 
+// total split cap
+const MAX_SPLIT = 20;
+
 /* ---------- Page ---------- */
 export default function InfluencerDashboardPage() {
   const supabase = createClientComponentClient();
@@ -89,11 +92,16 @@ export default function InfluencerDashboardPage() {
   const [promos, setPromos] = useState<PromoRow[]>([]);
   const [code, setCode] = useState("");
   const [userPct, setUserPct] = useState(10);
-  const [commPct, setCommPct] = useState(10);
+  const [commPct, setCommPct] = useState(MAX_SPLIT - 10); // auto-split
   const sumPct = useMemo(
     () => Number(userPct || 0) + Number(commPct || 0),
     [userPct, commPct]
   );
+
+  // field-level errors
+  const [codeError, setCodeError] = useState<string | null>(null);
+  const [userPctError, setUserPctError] = useState<string | null>(null);
+
   const [editing, setEditing] = useState<PromoRow | null>(null);
   const [deleting, setDeleting] = useState<PromoRow | null>(null);
 
@@ -103,7 +111,7 @@ export default function InfluencerDashboardPage() {
 
   // messaging
   const [flash, setFlash] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null); // for generic promo list errors
 
   /* ---------- Auth bootstrap & cookie bridge ---------- */
   useEffect(() => {
@@ -216,31 +224,35 @@ export default function InfluencerDashboardPage() {
 
   /* ---------- Create GLOBAL promo ---------- */
   const createPromo = async () => {
-    setErr(null);
     if (!token) {
-      setErr("Please sign in again.");
+      setUserPctError("Please sign in again.");
       return;
     }
+
+    // reset field errors
+    setCodeError(null);
+    setUserPctError(null);
+
     if (!code.trim()) {
-      setErr("Enter your code.");
+      setCodeError("Enter your code.");
       return;
     }
-    if (userPct < 0 || userPct > 100 || commPct < 0 || commPct > 100) {
-      setErr("Percents must be between 0 and 100.");
+
+    if (userPct < 0 || userPct > MAX_SPLIT) {
+      setUserPctError(`Customer discount must be between 0 and ${MAX_SPLIT}%.`);
       return;
     }
-    if (sumPct > 20.0001) {
-      setErr("Customer % + You % must be ≤ 20.");
-      return;
-    }
+
+    const autoComm = Math.max(0, MAX_SPLIT - Number(userPct || 0));
+    setCommPct(autoComm);
 
     const payload: Record<string, any> = {
       code: code.trim().toUpperCase(),
       scope: "global",
       discount_percent: Number(userPct),
-      commission_percent: Number(commPct),
+      commission_percent: autoComm,
       user_discount_pct: Number(userPct), // compat
-      commission_pct: Number(commPct), // compat
+      commission_pct: autoComm, // compat
     };
 
     const res = await fetch("/api/influencer/promos", {
@@ -255,13 +267,14 @@ export default function InfluencerDashboardPage() {
     const j = await res.json().catch(() => ({}));
 
     if (!res.ok || j?.ok === false) {
-      setErr(j?.error || "Could not create promo.");
+      // show API error under code field
+      setCodeError(j?.error || "Could not create promo.");
       return;
     }
 
     setCode("");
     setUserPct(10);
-    setCommPct(10);
+    setCommPct(MAX_SPLIT - 10);
     setFlash("Promo created");
     setTimeout(() => setFlash(null), 1500);
     await loadPromos();
@@ -312,28 +325,6 @@ export default function InfluencerDashboardPage() {
 
   return (
     <div className="mx-auto w-full max-w-5xl px-3 py-4 sm:px-4">
-      {/* ===== HEADER / GREETING ===== */}
-      <div className="mb-4 rounded-2xl border bg-white p-4 shadow-sm">
-        <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
-          <div>
-            <h1 className="text-lg font-semibold">Your dashboard</h1>
-            <p className="text-xs text-neutral-600">
-              Create global promos, track earnings & request manual payouts —
-              all here.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <a
-              href="/influencer/links"
-              className="inline-flex items-center gap-2 rounded-xl border bg-neutral-50 px-3 py-2 text-sm font-medium"
-            >
-              <Share2 className="h-4 w-4" />
-              Share links
-            </a>
-          </div>
-        </div>
-      </div>
-
       {/* ===== STATS ROW ===== */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard
@@ -363,7 +354,7 @@ export default function InfluencerDashboardPage() {
       </div>
 
       {/* ===== WALLET & REDEEM ===== */}
-      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
         <div className="md:col-span-2 rounded-2xl border bg-white p-4 shadow-sm">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-2">
@@ -420,34 +411,22 @@ export default function InfluencerDashboardPage() {
             </p>
           )}
         </div>
-
-        {/* Info & messages */}
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
-          <div className="text-sm font-semibold">Tips</div>
-          <p className="mt-1 text-xs text-neutral-600">
-            Global codes apply to the entire cart; server still enforces
-            per-product caps.
-          </p>
-          {flash && (
-            <div className="mt-2 rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-700">
-              {flash}
-            </div>
-          )}
-          {err && (
-            <div className="mt-2 rounded-md bg-red-50 px-2 py-1 text-xs text-red-700">
-              {err}
-            </div>
-          )}
-        </div>
       </div>
 
       {/* ===== PROMOS: CREATE + LIST (INLINE) ===== */}
       <div className="mt-4 space-y-4">
         {/* Create */}
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
-          <div className="mb-2 flex items-center gap-2">
-            <BadgePercent className="h-4 w-4" />
-            <div className="text-sm font-semibold">Create a global promo</div>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <BadgePercent className="h-4 w-4" />
+              <div className="text-sm font-semibold">Create a global promo</div>
+            </div>
+            {flash && (
+              <div className="rounded-md bg-emerald-50 px-2 py-1 text-[11px] text-emerald-700">
+                {flash}
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -457,8 +436,14 @@ export default function InfluencerDashboardPage() {
                 className="w-full rounded-lg border px-3 py-2 text-sm uppercase"
                 placeholder="MYCODE"
                 value={code}
-                onChange={(e) => setCode(e.target.value.toUpperCase())}
+                onChange={(e) => {
+                  setCode(e.target.value.toUpperCase());
+                  setCodeError(null);
+                }}
               />
+              {codeError && (
+                <p className="mt-1 text-[11px] text-red-600">{codeError}</p>
+              )}
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium">
@@ -468,25 +453,43 @@ export default function InfluencerDashboardPage() {
                 className="w-full rounded-lg border px-3 py-2 text-sm"
                 type="number"
                 min={0}
-                max={100}
+                max={MAX_SPLIT}
                 step={0.5}
                 value={userPct}
-                onChange={(e) => setUserPct(Number(e.target.value))}
+                onChange={(e) => {
+                  const raw = Number(e.target.value);
+                  if (Number.isNaN(raw)) {
+                    setUserPct(0);
+                    setCommPct(MAX_SPLIT);
+                    setUserPctError(null);
+                    return;
+                  }
+                  let value = raw;
+                  if (value < 0) value = 0;
+                  if (value > MAX_SPLIT) value = MAX_SPLIT;
+                  setUserPct(value);
+                  setCommPct(MAX_SPLIT - value);
+                  setUserPctError(null);
+                }}
               />
+              {userPctError && (
+                <p className="mt-1 text-[11px] text-red-600">{userPctError}</p>
+              )}
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium">
                 Your commission (%)
               </label>
               <input
-                className="w-full rounded-lg border px-3 py-2 text-sm"
+                className="w-full rounded-lg border px-3 py-2 text-sm bg-neutral-50"
                 type="number"
-                min={0}
-                max={100}
-                step={0.5}
                 value={commPct}
-                onChange={(e) => setCommPct(Number(e.target.value))}
+                disabled
+                readOnly
               />
+              <p className="mt-1 text-[11px] text-neutral-600">
+                Auto-calculated so total stays at {MAX_SPLIT}%.
+              </p>
             </div>
           </div>
 
@@ -496,17 +499,15 @@ export default function InfluencerDashboardPage() {
               className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs"
               onClick={() => {
                 setUserPct(10);
-                setCommPct(10);
+                setCommPct(MAX_SPLIT - 10);
+                setUserPctError(null);
+                setCodeError(null);
               }}
             >
               <Check className="h-4 w-4" /> Recommended 10% + 10%
             </button>
-            <p
-              className={`text-[11px] ${
-                sumPct > 20 ? "text-red-600" : "text-neutral-600"
-              }`}
-            >
-              Split total: {sumPct}% • Typical cap is 20%.
+            <p className="text-[11px] text-neutral-600">
+              Split total: {sumPct}% of {MAX_SPLIT}% cap.
             </p>
           </div>
 
@@ -523,7 +524,14 @@ export default function InfluencerDashboardPage() {
 
         {/* List + manage */}
         <div className="rounded-2xl border bg-white p-4 shadow-sm">
-          <div className="mb-2 text-sm font-semibold">Your promo codes</div>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="text-sm font-semibold">Your promo codes</div>
+            {err && (
+              <div className="rounded-md bg-red-50 px-2 py-1 text-[11px] text-red-700">
+                {err}
+              </div>
+            )}
+          </div>
           {promoLoading ? (
             <ListSkeleton />
           ) : promos.length === 0 ? (
@@ -1200,7 +1208,7 @@ function RequestManualBody({
       )}
 
       <div className="space-y-2 text-xs text-neutral-700">
-        <div className="rounded-lg bg-amber-50 p-3 text-amber-800 flex gap-2">
+        <div className="flex gap-2 rounded-lg bg-amber-50 p-3 text-amber-800">
           <AlertCircle className="mt-0.5 h-4 w-4" />
           <div>
             Your payout request will appear as <em>Pending</em> until processed
@@ -1239,7 +1247,7 @@ function RequestManualBody({
   );
 }
 
-/* ---------- Edit & Delete Promo Modals (unchanged) ---------- */
+/* ---------- Edit & Delete Promo Modals ---------- */
 function EditPromoModal({
   promo,
   onClose,
@@ -1278,11 +1286,16 @@ function EditPromoModal({
       return;
     }
 
-    if (sum > 20.0001) {
+    if (form.discount_percent < 0 || form.discount_percent > MAX_SPLIT) {
       setSaving(false);
-      setError("Customer % + You % must be ≤ 20 (or the product cap).");
+      setError(`Customer % must be between 0 and ${MAX_SPLIT}.`);
       return;
     }
+
+    const autoComm = Math.max(
+      0,
+      MAX_SPLIT - Number(form.discount_percent || 0)
+    );
 
     const res = await fetch(
       `/api/influencer/promos/${encodeURIComponent(promo.id)}`,
@@ -1296,9 +1309,9 @@ function EditPromoModal({
         body: JSON.stringify({
           active: !!form.active,
           discount_percent: Number(form.discount_percent),
-          commission_percent: Number(form.commission_percent),
+          commission_percent: autoComm,
           user_discount_pct: Number(form.discount_percent),
-          commission_pct: Number(form.commission_percent),
+          commission_pct: autoComm,
         }),
       }
     );
@@ -1333,16 +1346,23 @@ function EditPromoModal({
             <input
               type="number"
               min={0}
-              max={100}
+              max={MAX_SPLIT}
               step="0.5"
               className="mt-1 w-full rounded-lg border px-3 py-2"
               value={form.discount_percent}
-              onChange={(e) =>
+              onChange={(e) => {
+                const raw = Number(e.target.value);
+                let value = Number.isNaN(raw) ? 0 : raw;
+                if (value < 0) value = 0;
+                if (value > MAX_SPLIT) value = MAX_SPLIT;
+                const autoComm = MAX_SPLIT - value;
                 setForm((f) => ({
                   ...f,
-                  discount_percent: Number(e.target.value),
-                }))
-              }
+                  discount_percent: value,
+                  commission_percent: autoComm,
+                }));
+                setError(null);
+              }}
             />
           </div>
           <div>
@@ -1350,26 +1370,21 @@ function EditPromoModal({
             <input
               type="number"
               min={0}
-              max={100}
+              max={MAX_SPLIT}
               step="0.5"
-              className="mt-1 w-full rounded-lg border px-3 py-2"
+              className="mt-1 w-full rounded-lg border px-3 py-2 bg-neutral-50"
               value={form.commission_percent}
-              onChange={(e) =>
-                setForm((f) => ({
-                  ...f,
-                  commission_percent: Number(e.target.value),
-                }))
-              }
+              disabled
+              readOnly
             />
+            <p className="mt-1 text-[11px] text-neutral-600">
+              Auto-calculated so total stays at {MAX_SPLIT}%.
+            </p>
           </div>
         </div>
 
-        <p
-          className={`text-[11px] ${
-            sum > 20 ? "text-red-600" : "text-neutral-600"
-          }`}
-        >
-          Split total: {sum}% • Typical cap is 20%.
+        <p className="text-[11px] text-neutral-600">
+          Split total: {sum}% of {MAX_SPLIT}% cap.
         </p>
 
         {error && (

@@ -99,7 +99,7 @@ export default function RegisterPage() {
   const router = useRouter();
   const params = useSearchParams();
   const redirect = params.get("redirect") || "/account";
-  const mode = params.get("mode"); // if "influencer", we’ll send to /influencer-request after signup
+  const mode = params.get("mode"); // if "influencer", send to /influencer-request after signup
 
   const [form, setForm] = useState({
     full_name: "",
@@ -140,12 +140,12 @@ export default function RegisterPage() {
     }
   };
 
-  // ⬇️ NEW: attach browser session to server cookies so SSR/API can see auth
+  // same cookie-attach flow as login page
   const attachAfterAuth = async () => {
     const { data: s } = await supabase.auth.getSession();
     const at = s?.session?.access_token;
     const rt = s?.session?.refresh_token;
-    if (!at || !rt) return; // no session yet (email confirmation flow)
+    if (!at || !rt) return;
     await fetch("/api/auth/attach", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -172,44 +172,48 @@ export default function RegisterPage() {
 
     setSubmitting(true);
     const email = form.email.trim();
+    const password = form.password;
 
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password: form.password,
-      options: {
-        data: { full_name: form.full_name },
-        // After email confirm, send them to login; you can change this to an auth callback if you use PKCE/OAuth
-        emailRedirectTo: `${
-          window.location.origin
-        }/auth/login?verified=1&redirect=${encodeURIComponent(
-          mode === "influencer" ? "/influencer-request" : redirect
-        )}`,
-      },
-    });
+    try {
+      // 1) Create user (no emailRedirectTo → no verification email)
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: { full_name: form.full_name },
+        },
+      });
 
-    setSubmitting(false);
+      if (error) {
+        toast.error(error.message || "Could not create account");
+        return;
+      }
 
-    if (error) {
-      toast.error(error.message || "Could not create account");
-      return;
+      // 2) Ensure we actually have a session
+      //    If email confirmations are disabled, signUp already returns one.
+      if (!data.session) {
+        const { data: signInData, error: signInError } =
+          await supabase.auth.signInWithPassword({ email, password });
+
+        if (signInError || !signInData.session) {
+          toast.error(
+            signInError?.message ||
+              "Account created but could not log in automatically."
+          );
+          return;
+        }
+      }
+
+      // 3) Attach session to server cookies (same as login)
+      await attachAfterAuth();
+
+      toast.success("Account created!");
+      router.replace(mode === "influencer" ? "/influencer-request" : redirect);
+    } catch (err: any) {
+      toast.error(err?.message || "Something went wrong");
+    } finally {
+      setSubmitting(false);
     }
-
-    // If email confirmation is ON, session will be null and an email was sent.
-    if (!data.session) {
-      toast.success("Check your inbox to verify your email.");
-      router.replace(
-        `/auth/login?verify=1&redirect=${encodeURIComponent(
-          mode === "influencer" ? "/influencer-request" : redirect
-        )}`
-      );
-      return;
-    }
-
-    // If confirmation is OFF (dev) and a session exists, attach cookies so server sees auth immediately
-    await attachAfterAuth();
-
-    toast.success("Account created!");
-    router.replace(mode === "influencer" ? "/influencer-request" : redirect);
   };
 
   return (

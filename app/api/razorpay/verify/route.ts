@@ -1,12 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
+import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 
-const money = (n: any) => +(Number(n || 0).toFixed(2));
+const ses = new SESClient({
+  region: process.env.AWS_REGION || "ap-south-1",
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+  },
+});
+
+const FROM_EMAIL = "info@madenkorea.com";
+const ADMIN_EMAILS = [
+  "arunpandian972000@gmail.com",
+  "velu3prabhakaran@gmail.com",
+];
+
+const money = (n: any) => +Number(n || 0).toFixed(2);
 
 export async function POST(req: NextRequest) {
   const dbg: any[] = [];
   try {
+    // Basic SES env debug
+    console.log("RZP verify: SES env", {
+      region: process.env.AWS_REGION,
+      hasAccessKey: !!process.env.AWS_ACCESS_KEY_ID,
+      hasSecretKey: !!process.env.AWS_SECRET_ACCESS_KEY,
+    });
+
     const url = new URL(req.url);
     const DEBUG = url.searchParams.get("debug") === "1";
     let body: any = {};
@@ -20,19 +42,31 @@ export async function POST(req: NextRequest) {
       razorpay_payment_id,
       razorpay_signature,
       app_order_id,
-      raw,            // optional from client handler
-      __debug,        // optional flag in body
+      raw,
+      __debug,
     } = body || {};
     const WANT_DEBUG = DEBUG || !!__debug;
 
-    dbg.push({ step: "init", env: {
-      hasServiceRoleKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
-      hasRZPKeyId: !!process.env.RAZORPAY_KEY_ID,
-      hasRZPKeySecret: !!process.env.RAZORPAY_KEY_SECRET,
-    }});
+    dbg.push({
+      step: "init",
+      env: {
+        hasServiceRoleKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+        hasRZPKeyId: !!process.env.RAZORPAY_KEY_ID,
+        hasRZPKeySecret: !!process.env.RAZORPAY_KEY_SECRET,
+      },
+    });
 
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !app_order_id) {
-      const res = { ok: false, error: "Missing fields", debug: WANT_DEBUG ? dbg : undefined };
+    if (
+      !razorpay_order_id ||
+      !razorpay_payment_id ||
+      !razorpay_signature ||
+      !app_order_id
+    ) {
+      const res = {
+        ok: false,
+        error: "Missing fields",
+        debug: WANT_DEBUG ? dbg : undefined,
+      };
       return NextResponse.json(res, { status: 400 });
     }
 
@@ -43,9 +77,18 @@ export async function POST(req: NextRequest) {
       .digest("hex");
 
     const sigOk = expected === razorpay_signature;
-    dbg.push({ step: "sig", expected, provided: razorpay_signature, ok: sigOk });
+    dbg.push({
+      step: "sig",
+      expected,
+      provided: razorpay_signature,
+      ok: sigOk,
+    });
     if (!sigOk) {
-      const res = { ok: false, error: "Invalid signature", debug: WANT_DEBUG ? dbg : undefined };
+      const res = {
+        ok: false,
+        error: "Invalid signature",
+        debug: WANT_DEBUG ? dbg : undefined,
+      };
       return NextResponse.json(res, { status: 400 });
     }
 
@@ -58,7 +101,8 @@ export async function POST(req: NextRequest) {
     // 2) Load order (+ fields we use)
     const { data: order, error: oErr } = await admin
       .from("orders")
-      .select(`
+      .select(
+        `
         id,
         user_id,
         status,
@@ -70,39 +114,59 @@ export async function POST(req: NextRequest) {
         order_number,
         promo_code_id,
         promo_snapshot
-      `)
+      `
+      )
       .eq("id", app_order_id)
       .maybeSingle();
 
     dbg.push({ step: "order.load", error: oErr?.message, order });
     if (oErr || !order) {
-      const res = { ok: false, error: "Order not found", debug: WANT_DEBUG ? dbg : undefined };
+      const res = {
+        ok: false,
+        error: "Order not found",
+        debug: WANT_DEBUG ? dbg : undefined,
+      };
       return NextResponse.json(res, { status: 404 });
     }
     if (order.status === "paid") {
-      const res = { ok: true, order_id: order.id, order_number: order.order_number ?? order.id, debug: WANT_DEBUG ? dbg : undefined };
+      const res = {
+        ok: true,
+        order_id: order.id,
+        order_number: order.order_number ?? order.id,
+        debug: WANT_DEBUG ? dbg : undefined,
+      };
       return NextResponse.json(res);
     }
-    if (!["pending_payment","created"].includes(order.status)) {
-      const res = { ok: false, error: `Order status ${order.status}`, debug: WANT_DEBUG ? dbg : undefined };
+    if (!["pending_payment", "created"].includes(order.status)) {
+      const res = {
+        ok: false,
+        error: `Order status ${order.status}`,
+        debug: WANT_DEBUG ? dbg : undefined,
+      };
       return NextResponse.json(res, { status: 400 });
     }
 
     // 3) Existing attribution?
     const { data: attrib, error: aErr } = await admin
       .from("order_attributions")
-      .select("order_id, influencer_id, promo_code_id, attributed_by, discount_percent, commission_percent, commission_amount, currency, status")
+      .select(
+        "order_id, influencer_id, promo_code_id, attributed_by, discount_percent, commission_percent, commission_amount, currency, status"
+      )
       .eq("order_id", order.id)
       .maybeSingle();
     dbg.push({ step: "attrib.load", error: aErr?.message, attrib });
 
-    let discountPct = attrib?.discount_percent ? Number(attrib.discount_percent) : 0;
-    let commissionPct = attrib?.commission_percent ? Number(attrib.commission_percent) : 0;
+    let discountPct = attrib?.discount_percent
+      ? Number(attrib.discount_percent)
+      : 0;
+    let commissionPct = attrib?.commission_percent
+      ? Number(attrib.commission_percent)
+      : 0;
     let influencerId = attrib?.influencer_id || null;
     let promoCodeId = attrib?.promo_code_id || null;
     let attributedBy = attrib?.attributed_by || null;
 
-    console.log(influencerId)
+    console.log("RZP verify: influencerId", influencerId);
 
     const tryLoadPromoById = async (id?: string | null) => {
       if (!id) return null;
@@ -116,9 +180,13 @@ export async function POST(req: NextRequest) {
     };
 
     // 4) Prefer orders.promo_code_id / promo_snapshot, then fallback to RZP notes
-    if ((!attrib || !influencerId) && (order.promo_code_id || order.promo_snapshot)) {
+    if (
+      (!attrib || !influencerId) &&
+      (order.promo_code_id || order.promo_snapshot)
+    ) {
       let promo: any = null;
-      if (order.promo_code_id) promo = await tryLoadPromoById(order.promo_code_id);
+      if (order.promo_code_id)
+        promo = await tryLoadPromoById(order.promo_code_id);
       if (!promo && order.promo_snapshot) {
         const snap = order.promo_snapshot as any;
         const idGuess = snap?.id ?? snap?.promo_code_id ?? null;
@@ -126,12 +194,19 @@ export async function POST(req: NextRequest) {
       }
       if (promo) {
         influencerId = promo.influencer_id;
-        promoCodeId  = promo.id;
-        discountPct  = Number(promo.discount_percent || 0);
-        commissionPct= Number(promo.commission_percent || 0);
+        promoCodeId = promo.id;
+        discountPct = Number(promo.discount_percent || 0);
+        commissionPct = Number(promo.commission_percent || 0);
         attributedBy = "promo";
       }
-      dbg.push({ step: "attrib.from.order", influencerId, promoCodeId, discountPct, commissionPct, attributedBy });
+      dbg.push({
+        step: "attrib.from.order",
+        influencerId,
+        promoCodeId,
+        discountPct,
+        commissionPct,
+        attributedBy,
+      });
     }
 
     // Fetch RZP order (to get notes + amount_paid)
@@ -141,11 +216,20 @@ export async function POST(req: NextRequest) {
       const key_secret = process.env.RAZORPAY_KEY_SECRET!;
       const auth = Buffer.from(`${key_id}:${key_secret}`).toString("base64");
       try {
-        const r = await fetch(`https://api.razorpay.com/v1/orders/${razorpay_order_id}`, {
-          headers: { Authorization: `Basic ${auth}` },
-        });
+        const r = await fetch(
+          `https://api.razorpay.com/v1/orders/${razorpay_order_id}`,
+          {
+            headers: { Authorization: `Basic ${auth}` },
+          }
+        );
         ro = await r.json();
-        dbg.push({ step: "rzp.order", id: razorpay_order_id, amount: ro?.amount, amount_paid: ro?.amount_paid, notes: ro?.notes });
+        dbg.push({
+          step: "rzp.order",
+          id: razorpay_order_id,
+          amount: ro?.amount,
+          amount_paid: ro?.amount_paid,
+          notes: ro?.notes,
+        });
       } catch (e: any) {
         dbg.push({ step: "rzp.order.error", error: e?.message || String(e) });
       }
@@ -158,13 +242,20 @@ export async function POST(req: NextRequest) {
         const promo = await tryLoadPromoById(promoId);
         if (promo) {
           influencerId = promo.influencer_id;
-          promoCodeId  = promo.id;
-          discountPct  = Number(promo.discount_percent || 0);
-          commissionPct= Number(promo.commission_percent || 0);
+          promoCodeId = promo.id;
+          discountPct = Number(promo.discount_percent || 0);
+          commissionPct = Number(promo.commission_percent || 0);
           attributedBy = "promo";
         }
       }
-      dbg.push({ step: "attrib.from.notes", influencerId, promoCodeId, discountPct, commissionPct, attributedBy });
+      dbg.push({
+        step: "attrib.from.notes",
+        influencerId,
+        promoCodeId,
+        discountPct,
+        commissionPct,
+        attributedBy,
+      });
     }
 
     // 5) Compute commission from SUBTOTAL
@@ -174,30 +265,26 @@ export async function POST(req: NextRequest) {
 
     // 5b) Write attribution robustly (insert then update)
     if (influencerId) {
-      // INSERT
-      const ins = await admin
-        .from("order_attributions")
-        .insert({
-          order_id: order.id,
-          influencer_id: influencerId,
-          promo_code_id: promoCodeId ?? null,
-          attributed_by: (attributedBy ?? (promoCodeId ? "promo" : "link")),
-          discount_percent: discountPct,
-          commission_percent: commissionPct,
-          commission_amount: commissionAmount,
-          currency: order.currency || "INR",
-          status: "pending",
-        });
+      const ins = await admin.from("order_attributions").insert({
+        order_id: order.id,
+        influencer_id: influencerId,
+        promo_code_id: promoCodeId ?? null,
+        attributed_by: attributedBy ?? (promoCodeId ? "promo" : "link"),
+        discount_percent: discountPct,
+        commission_percent: commissionPct,
+        commission_amount: commissionAmount,
+        currency: order.currency || "INR",
+        status: "pending",
+      });
       dbg.push({ step: "attrib.insert", error: ins.error?.message });
 
       if (ins.error) {
-        // UPDATE fallback by order_id
         const upd = await admin
           .from("order_attributions")
           .update({
             influencer_id: influencerId,
             promo_code_id: promoCodeId ?? null,
-            attributed_by: (attributedBy ?? (promoCodeId ? "promo" : "link")),
+            attributed_by: attributedBy ?? (promoCodeId ? "promo" : "link"),
             discount_percent: discountPct,
             commission_percent: commissionPct,
             commission_amount: commissionAmount,
@@ -212,8 +299,8 @@ export async function POST(req: NextRequest) {
     }
 
     // 6) Mark order paid + write actual paid
-    const shippingFee   = money(order.shipping_fee);
-    const discountAmount= money(base * (discountPct / 100));
+    const shippingFee = money(order.shipping_fee);
+    const discountAmount = money(base * (discountPct / 100));
     const computedFinal = money(base - discountAmount + shippingFee);
 
     const paidAmount =
@@ -233,9 +320,17 @@ export async function POST(req: NextRequest) {
         paid_at: new Date().toISOString(),
       })
       .eq("id", order.id);
-    dbg.push({ step: "order.update", error: updOrder.error?.message, write: { discountAmount, paidAmount, shippingFee } });
+    dbg.push({
+      step: "order.update",
+      error: updOrder.error?.message,
+      write: { discountAmount, paidAmount, shippingFee },
+    });
     if (updOrder.error) {
-      const res = { ok: false, error: updOrder.error.message, debug: WANT_DEBUG ? dbg : undefined };
+      const res = {
+        ok: false,
+        error: updOrder.error.message,
+        debug: WANT_DEBUG ? dbg : undefined,
+      };
       return NextResponse.json(res, { status: 500 });
     }
 
@@ -250,8 +345,153 @@ export async function POST(req: NextRequest) {
 
     // 8) Clear cart
     if (order.user_id) {
-      const cleared = await admin.rpc("cart_clear_for_user", { p_user_id: order.user_id });
+      const cleared = await admin.rpc("cart_clear_for_user", {
+        p_user_id: order.user_id,
+      });
       dbg.push({ step: "cart.clear", error: cleared.error?.message });
+    }
+
+    // 9) Send confirmation emails (best-effort; failures won't affect order success)
+    try {
+      const orderNumber = order.order_number ?? order.id;
+      const currency = order.currency || "INR";
+      const totalFormatted = `${currency} ${paidAmount.toFixed(2)}`;
+
+      let userEmail: string | null = null;
+      let userName: string | null = null;
+
+      if (order.user_id) {
+        // profile for full_name
+        const { data: profile } = await admin
+          .from("profiles")
+          .select("full_name")
+          .eq("id", order.user_id)
+          .maybeSingle();
+
+        // auth user for email (correct admin API)
+        const { data: userData, error: userErr } =
+          await admin.auth.admin.getUserById(order.user_id);
+
+        dbg.push({ step: "user.load", error: userErr?.message });
+        console.log("RZP verify: loaded user from Supabase", {
+          userErr,
+          hasUser: !!userData?.user,
+        });
+
+        userEmail = userData?.user?.email ?? null;
+        userName =
+          profile?.full_name ??
+          (userData?.user?.user_metadata as any)?.full_name ??
+          null;
+      }
+
+      // === User confirmation email ===
+      if (userEmail) {
+        const friendlyName = userName || "there";
+        const subject = `Your Made in Korea order ${orderNumber} is confirmed`;
+
+        console.log("SES: sending user email", { to: userEmail, subject });
+
+        const userHtml = `
+          <div style="font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;color:#111">
+            <h2 style="font-size:18px;font-weight:600">Hi ${friendlyName},</h2>
+            <p>Thank you for shopping with <strong>Made in Korea</strong>. Your order has been placed successfully.</p>
+            <p>
+              <strong>Order number:</strong> ${orderNumber}<br/>
+              <strong>Total:</strong> ${totalFormatted}<br/>
+              <strong>Payment method:</strong> Razorpay
+            </p>
+            <p>We’ll send you another email when your order ships.</p>
+            <p style="margin-top:24px">Love,<br/>Team Made in Korea</p>
+          </div>
+        `;
+
+        const userText = [
+          `Hi ${friendlyName},`,
+          "",
+          "Thank you for shopping with Made in Korea. Your order has been placed successfully.",
+          "",
+          `Order number: ${orderNumber}`,
+          `Total: ${totalFormatted}`,
+          "Payment method: Razorpay",
+          "",
+          "We’ll send you another email when your order ships.",
+          "",
+          "Love,",
+          "Team Made in Korea",
+        ].join("\n");
+
+        await ses.send(
+          new SendEmailCommand({
+            Source: FROM_EMAIL,
+            Destination: { ToAddresses: [userEmail] },
+            Message: {
+              Subject: { Data: subject },
+              Body: {
+                Html: { Data: userHtml },
+                Text: { Data: userText },
+              },
+            },
+          })
+        );
+
+        console.log("SES: user email sent OK", { to: userEmail });
+        dbg.push({ step: "email.user.ok", to: userEmail });
+      } else {
+        console.log("SES: skipping user email – no userEmail resolved", {
+          userId: order.user_id,
+        });
+        dbg.push({ step: "email.user.skip", reason: "no user email" });
+      }
+
+      // === Admin notification email ===
+      const adminSubject = `New order placed: ${orderNumber}`;
+      const adminHtml = `
+        <div style="font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;color:#111">
+          <h2 style="font-size:18px;font-weight:600">New order placed</h2>
+          <p><strong>Order number:</strong> ${orderNumber}</p>
+          <p><strong>Total:</strong> ${totalFormatted}</p>
+          <p><strong>User ID:</strong> ${order.user_id || "guest"}</p>
+          <p><strong>User email:</strong> ${userEmail || "—"}</p>
+          <p><strong>Payment provider:</strong> Razorpay</p>
+        </div>
+      `;
+      const adminText = [
+        "New order placed:",
+        `Order number: ${orderNumber}`,
+        `Total: ${totalFormatted}`,
+        `User ID: ${order.user_id || "guest"}`,
+        `User email: ${userEmail || "—"}`,
+        "Payment provider: Razorpay",
+      ].join("\n");
+
+      console.log("SES: sending admin email", {
+        to: ADMIN_EMAILS,
+        subject: adminSubject,
+      });
+
+      await ses.send(
+        new SendEmailCommand({
+          Source: FROM_EMAIL,
+          Destination: {
+            ToAddresses: ADMIN_EMAILS,
+            CcAddresses: [FROM_EMAIL],
+          },
+          Message: {
+            Subject: { Data: adminSubject },
+            Body: {
+              Html: { Data: adminHtml },
+              Text: { Data: adminText },
+            },
+          },
+        })
+      );
+
+      console.log("SES: admin email sent OK", { to: ADMIN_EMAILS });
+      dbg.push({ step: "email.admin.ok", to: ADMIN_EMAILS });
+    } catch (e: any) {
+      console.error("SES: email sending failed", e);
+      dbg.push({ step: "email.error", error: e?.message || String(e) });
     }
 
     const res = {
@@ -262,7 +502,11 @@ export async function POST(req: NextRequest) {
     };
     return NextResponse.json(res);
   } catch (e: any) {
+    console.error("RZP verify fatal error", e);
     dbg.push({ step: "fatal", error: e?.message || String(e) });
-    return NextResponse.json({ ok: false, error: e?.message || "Failed", debug: dbg }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: e?.message || "Failed", debug: dbg },
+      { status: 500 }
+    );
   }
 }

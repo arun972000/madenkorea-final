@@ -29,6 +29,7 @@ type CartContextType = {
   cartId: string | null;
   totals: CartTotals | null;
   items: CartItemRow[];
+  totalItems: number;
   addItem: (productId: string, qty?: number) => Promise<void>;
   setQty: (itemId: string, qty: number) => Promise<void>;
   removeItem: (itemId: string) => Promise<void>;
@@ -59,6 +60,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [cartId, setCartId] = useState<string | null>(null);
   const [totals, setTotals] = useState<CartTotals | null>(null);
   const [items, setItems] = useState<CartItemRow[]>([]);
+
+  const totalItems = useMemo(
+    () => items.reduce((sum, item) => sum + (item.quantity || 0), 0),
+    [items]
+  );
 
   // Initial load + merge guest → server on login
   useEffect(() => {
@@ -202,6 +208,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       cartId,
       totals,
       items,
+      totalItems,
       addItem,
       setQty,
       removeItem,
