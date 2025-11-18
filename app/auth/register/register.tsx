@@ -20,40 +20,29 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { Eye, EyeOff, CheckCircle2, XCircle } from "lucide-react";
 
+// Browser Supabase client
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
   { auth: { persistSession: true, autoRefreshToken: true } }
 );
 
-/* ---------- Strength helpers (no external libs) ---------- */
-type Strength = { score: 0 | 1 | 2 | 3 | 4; label: string; tips: string[] };
-
-function hasLower(s: string) {
-  return /[a-z]/.test(s);
-}
-function hasUpper(s: string) {
-  return /[A-Z]/.test(s);
-}
-function hasNumber(s: string) {
-  return /\d/.test(s);
-}
-function hasSymbol(s: string) {
-  return /[^A-Za-z0-9\s]/.test(s);
-}
+/* -------------------------------------------------------------------------- */
+/*                         PASSWORD VALIDATION HELPERS                        */
+/* -------------------------------------------------------------------------- */
+function hasLower(s: string) { return /[a-z]/.test(s); }
+function hasUpper(s: string) { return /[A-Z]/.test(s); }
+function hasNumber(s: string) { return /\d/.test(s); }
+function hasSymbol(s: string) { return /[^A-Za-z0-9\s]/.test(s); }
 function hasSequence(s: string) {
-  return /(0123|1234|2345|3456|4567|5678|6789|abcd|bcde|cdef|defg|qwer|asdf|zxcv)/i.test(
-    s
-  );
+  return /(0123|1234|2345|3456|4567|5678|6789|abcd|bcde|cdef|defg|qwer|asdf|zxcv)/i.test(s);
 }
-function hasRepeat(s: string) {
-  return /(.)\1{2,}/.test(s);
-}
+function hasRepeat(s: string) { return /(.)\1{2,}/.test(s); }
 
-function scorePassword(pw: string): Strength {
+// Full scoring logic preserved
+function scorePassword(pw: string) {
   const tips: string[] = [];
-  if (!pw)
-    return { score: 0, label: "Too weak", tips: ["Use at least 8 characters"] };
+  if (!pw) return { score: 0, label: "Too weak", tips: ["Use at least 8 characters"] };
 
   let score = 0;
 
@@ -67,6 +56,7 @@ function scorePassword(pw: string): Strength {
     hasNumber(pw),
     hasSymbol(pw),
   ].filter(Boolean).length;
+
   score += Math.max(0, varieties - 1);
 
   if (hasSequence(pw)) score -= 1;
@@ -82,7 +72,7 @@ function scorePassword(pw: string): Strength {
   if (hasSequence(pw)) tips.push("Avoid common sequences (1234, abcd)");
   if (hasRepeat(pw)) tips.push("Avoid repeated characters");
 
-  return { score: score as 0 | 1 | 2 | 3 | 4, label: labels[score], tips };
+  return { score, label: labels[score], tips };
 }
 
 function segClass(active: boolean, idx: number, score: number) {
@@ -98,22 +88,26 @@ function segClass(active: boolean, idx: number, score: number) {
 export default function RegisterPage() {
   const router = useRouter();
   const params = useSearchParams();
-  const redirect = params.get("redirect") || "/account";
-  const mode = params.get("mode"); // if "influencer", send to /influencer-request after signup
 
+  const redirect = params.get("redirect") || "/account";
+  const mode = params.get("mode");
+
+  /* OAuth buttons loading state */
+  const [oauthLoading, setOauthLoading] = useState<"google" | "facebook" | null>(null);
+
+  /* Original form states */
   const [form, setForm] = useState({
     full_name: "",
     email: "",
     password: "",
     confirm: "",
   });
+
   const [agree, setAgree] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const [showPw, setShowPw] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
-  const peekPwTimeout = useRef<number | null>(null);
-  const peekConfirmTimeout = useRef<number | null>(null);
 
   const strength = useMemo(() => scorePassword(form.password), [form.password]);
   const meetsMin = form.password.length >= 8;
@@ -125,27 +119,14 @@ export default function RegisterPage() {
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [e.target.name]: e.target.value }));
 
-  const holdToPeek = (which: "pw" | "confirm", down: boolean) => {
-    const setFn = which === "pw" ? setShowPw : setShowConfirm;
-    const timeoutRef = which === "pw" ? peekPwTimeout : peekConfirmTimeout;
-
-    if (down) {
-      setFn(true);
-      const id = window.setTimeout(() => setFn(false), 2000);
-      if (which === "pw") peekPwTimeout.current = id;
-      else peekConfirmTimeout.current = id;
-    } else {
-      setFn(false);
-      if (timeoutRef.current) window.clearTimeout(timeoutRef.current);
-    }
-  };
-
-  // same cookie-attach flow as login page
+  /* Attach SSR cookies */
   const attachAfterAuth = async () => {
     const { data: s } = await supabase.auth.getSession();
     const at = s?.session?.access_token;
     const rt = s?.session?.refresh_token;
+
     if (!at || !rt) return;
+
     await fetch("/api/auth/attach", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -154,6 +135,41 @@ export default function RegisterPage() {
     }).catch(() => {});
   };
 
+  /* -------------------------------------------------------------------------- */
+  /*                               OAUTH HANDLERS                               */
+  /* -------------------------------------------------------------------------- */
+  const loginWithProvider = async (provider: "google" | "facebook") => {
+    try {
+      setOauthLoading(provider);
+
+      const redirectParam = redirect || "/account";
+
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback?redirect=${encodeURIComponent(
+            redirectParam
+          )}`,
+        },
+      });
+
+      if (error) {
+        toast.error(error.message || `Could not start ${provider} sign in`);
+        setOauthLoading(null);
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Something went wrong, please try again.");
+      setOauthLoading(null);
+    }
+  };
+
+  const handleGoogleLogin = () => loginWithProvider("google");
+  const handleFacebookLogin = () => loginWithProvider("facebook");
+
+  /* -------------------------------------------------------------------------- */
+  /*                           FORM SUBMIT HANDLER                               */
+  /* -------------------------------------------------------------------------- */
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -171,17 +187,15 @@ export default function RegisterPage() {
     }
 
     setSubmitting(true);
+
     const email = form.email.trim();
     const password = form.password;
 
     try {
-      // 1) Create user (no emailRedirectTo → no verification email)
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        options: {
-          data: { full_name: form.full_name },
-        },
+        options: { data: { full_name: form.full_name } },
       });
 
       if (error) {
@@ -189,8 +203,6 @@ export default function RegisterPage() {
         return;
       }
 
-      // 2) Ensure we actually have a session
-      //    If email confirmations are disabled, signUp already returns one.
       if (!data.session) {
         const { data: signInData, error: signInError } =
           await supabase.auth.signInWithPassword({ email, password });
@@ -204,31 +216,33 @@ export default function RegisterPage() {
         }
       }
 
-      // 3) Attach session to server cookies (same as login)
       await attachAfterAuth();
 
       toast.success("Account created!");
       router.replace(mode === "influencer" ? "/influencer-request" : redirect);
     } catch (err: any) {
-      toast.error(err?.message || "Something went wrong");
+      toast.error(err.message || "Something went wrong");
     } finally {
       setSubmitting(false);
     }
   };
 
+  /* -------------------------------------------------------------------------- */
+  /*                                    UI                                      */
+  /* -------------------------------------------------------------------------- */
   return (
     <CustomerLayout>
       <div className="container mx-auto py-16">
         <Card className="max-w-md mx-auto">
           <CardHeader>
             <CardTitle className="text-2xl">Create account</CardTitle>
-            <CardDescription>
-              Sign up with your email to get started
-            </CardDescription>
+            <CardDescription>Sign up with your email to get started</CardDescription>
           </CardHeader>
 
           <form onSubmit={onSubmit}>
             <CardContent className="space-y-5">
+
+              {/* Full Name */}
               <div className="space-y-2">
                 <Label htmlFor="full_name">Full name</Label>
                 <Input
@@ -236,21 +250,19 @@ export default function RegisterPage() {
                   name="full_name"
                   value={form.full_name}
                   onChange={onChange}
-                  placeholder="Your name"
                   required
                 />
               </div>
 
+              {/* Email */}
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
                 <Input
                   id="email"
                   name="email"
                   type="email"
-                  autoComplete="email"
                   value={form.email}
                   onChange={onChange}
-                  placeholder="you@example.com"
                   required
                 />
               </div>
@@ -265,7 +277,6 @@ export default function RegisterPage() {
                     type={showPw ? "text" : "password"}
                     value={form.password}
                     onChange={onChange}
-                    autoComplete="new-password"
                     required
                   />
                   <Button
@@ -273,23 +284,12 @@ export default function RegisterPage() {
                     variant="secondary"
                     className="shrink-0"
                     onClick={() => setShowPw((v) => !v)}
-                    onMouseDown={() => holdToPeek("pw", true)}
-                    onMouseUp={() => holdToPeek("pw", false)}
-                    onMouseLeave={() => holdToPeek("pw", false)}
-                    onTouchStart={() => holdToPeek("pw", true)}
-                    onTouchEnd={() => holdToPeek("pw", false)}
-                    aria-label={showPw ? "Hide password" : "Show password"}
-                    title="Click to toggle • Hold to peek"
                   >
-                    {showPw ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
+                    {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </Button>
                 </div>
 
-                {/* Strength meter */}
+                {/* Strength Meter */}
                 <div className="mt-2">
                   <div className="flex gap-1 h-2">
                     {[0, 1, 2, 3].map((i) => (
@@ -319,6 +319,7 @@ export default function RegisterPage() {
                       )}
                       At least 8 characters
                     </li>
+
                     <li className="flex items-center gap-1">
                       {hasU ? (
                         <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
@@ -327,6 +328,7 @@ export default function RegisterPage() {
                       )}
                       Uppercase letter
                     </li>
+
                     <li className="flex items-center gap-1">
                       {hasN ? (
                         <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
@@ -335,6 +337,7 @@ export default function RegisterPage() {
                       )}
                       Number
                     </li>
+
                     <li className="flex items-center gap-1">
                       {hasS ? (
                         <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
@@ -353,7 +356,7 @@ export default function RegisterPage() {
                 </div>
               </div>
 
-              {/* Confirm */}
+              {/* Confirm Password */}
               <div className="space-y-2">
                 <Label htmlFor="confirm">Confirm password</Label>
                 <div className="flex gap-2">
@@ -363,7 +366,6 @@ export default function RegisterPage() {
                     type={showConfirm ? "text" : "password"}
                     value={form.confirm}
                     onChange={onChange}
-                    autoComplete="new-password"
                     required
                   />
                   <Button
@@ -371,13 +373,6 @@ export default function RegisterPage() {
                     variant="secondary"
                     className="shrink-0"
                     onClick={() => setShowConfirm((v) => !v)}
-                    onMouseDown={() => holdToPeek("confirm", true)}
-                    onMouseUp={() => holdToPeek("confirm", false)}
-                    onMouseLeave={() => holdToPeek("confirm", false)}
-                    onTouchStart={() => holdToPeek("confirm", true)}
-                    onTouchEnd={() => holdToPeek("confirm", false)}
-                    aria-label={showConfirm ? "Hide password" : "Show password"}
-                    title="Click to toggle • Hold to peek"
                   >
                     {showConfirm ? (
                       <EyeOff className="h-4 w-4" />
@@ -386,6 +381,7 @@ export default function RegisterPage() {
                     )}
                   </Button>
                 </div>
+
                 {form.confirm.length > 0 && (
                   <p
                     className={`text-xs mt-1 ${
@@ -397,39 +393,61 @@ export default function RegisterPage() {
                 )}
               </div>
 
+              {/* Terms */}
               <div className="flex items-center space-x-2">
                 <Checkbox
                   id="agree"
                   checked={agree}
                   onCheckedChange={(v: any) => setAgree(!!v)}
                 />
-                <label
-                  htmlFor="agree"
-                  className="text-sm text-muted-foreground"
-                >
+                <label htmlFor="agree" className="text-sm text-muted-foreground">
                   I agree to the{" "}
-                  <Link
-                    href="/legal/terms"
-                    className="text-primary hover:underline"
-                  >
+                  <Link href="/legal/terms" className="text-primary hover:underline">
                     Terms
                   </Link>{" "}
                   and{" "}
-                  <Link
-                    href="/legal/privacy"
-                    className="text-primary hover:underline"
-                  >
+                  <Link href="/legal/privacy" className="text-primary hover:underline">
                     Privacy Policy
                   </Link>
                   .
                 </label>
               </div>
-            </CardContent>
-
-            <CardFooter className="flex flex-col gap-4">
               <Button type="submit" className="w-full" disabled={submitting}>
                 {submitting ? "Creating…" : "Create account"}
               </Button>
+              {/* Divider */}
+              <div className="relative flex items-center py-2 mt-4">
+                <div className="flex-1 border-t" />
+                <span className="px-2 text-xs text-muted-foreground">or continue with</span>
+                <div className="flex-1 border-t" />
+              </div>
+
+              {/* Social OAuth Buttons */}
+              <div className="space-y-2 mt-4">
+                <Button
+                  type="button"
+                  onClick={handleGoogleLogin}
+                  disabled={oauthLoading !== null}
+                  className="w-full bg-white text-black border border-gray-300 hover:bg-gray-100"
+                >
+                  {oauthLoading === "google" ? "Redirecting to Google…" : "Continue with Google"}
+                </Button>
+
+                <Button
+                  type="button"
+                  onClick={handleFacebookLogin}
+                  disabled={oauthLoading !== null}
+                  className="w-full bg-[#1877F2] text-white hover:bg-[#166FE5]"
+                >
+                  {oauthLoading === "facebook" ? "Redirecting to Facebook…" : "Continue with Facebook"}
+                </Button>
+              </div>
+
+            </CardContent>
+
+            <CardFooter className="flex flex-col gap-4">
+
+
               <p className="text-sm text-center text-muted-foreground">
                 Already have an account?{" "}
                 <Link

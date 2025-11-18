@@ -25,6 +25,7 @@ export default function LoginPage() {
   const router = useRouter();
   const params = useSearchParams();
   const redirect = params.get("redirect") || "/account";
+const [oauthLoading, setOauthLoading] = useState<"google" | "facebook" | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -102,6 +103,40 @@ export default function LoginPage() {
     toast.success("Reset link sent to your email");
   };
 
+const loginWithProvider = async (provider: "google" | "facebook") => {
+  try {
+    setOauthLoading(provider);
+
+    const redirectParam = redirect || "/account";
+
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        // This must match what you added in Supabase URL config:
+        // e.g. http://localhost:3000/auth/callback
+        redirectTo: `${window.location.origin}/auth/callback?redirect=${encodeURIComponent(
+          redirectParam,
+        )}`,
+      },
+    });
+
+    if (error) {
+      toast.error(error.message || `Could not start ${provider} sign in`);
+      setOauthLoading(null);
+    }
+    // On success, browser will be redirected away, so code after this usually
+    // won't run. We don't call attachAfterAuth here – that's done in /auth/callback.
+  } catch (err: any) {
+    console.error(err);
+    toast.error("Something went wrong, please try again.");
+    setOauthLoading(null);
+  }
+};
+
+const handleGoogleLogin = () => loginWithProvider("google");
+const handleFacebookLogin = () => loginWithProvider("facebook");
+
+
   if (loading) {
     return (
       <CustomerLayout>
@@ -126,6 +161,9 @@ export default function LoginPage() {
 
           <form onSubmit={onSubmit}>
             <CardContent className="space-y-4">
+
+
+
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
                 <Input
@@ -182,12 +220,45 @@ export default function LoginPage() {
                   </button>
                 </div>
               </div>
+               <Button type="submit" className="w-full" disabled={submitting}>
+                {submitting ? "Signing in…" : "Sign in"}
+              </Button>
+                {/* Divider */}
+  <div className="relative flex items-center py-2 mt-4">
+  <div className="flex-1 border-t" />
+  <span className="px-2 text-xs text-muted-foreground">
+    or continue with
+  </span>
+  <div className="flex-1 border-t" />
+</div>
+{/* Social login buttons */}
+<div className="space-y-2 mt-4">
+
+  {/* Google Button */}
+  <Button
+    type="button"
+    onClick={handleGoogleLogin}
+    disabled={oauthLoading !== null}
+    className="w-full bg-white text-black border border-gray-300 hover:bg-gray-100"
+  >
+    {oauthLoading === "google" ? "Redirecting to Google…" : "Continue with Google"}
+  </Button>
+
+  {/* Facebook Button */}
+  <Button
+    type="button"
+    onClick={handleFacebookLogin}
+    disabled={oauthLoading !== null}
+    className="w-full bg-[#1877F2] text-white hover:bg-[#166FE5]"
+  >
+    {oauthLoading === "facebook" ? "Redirecting to Facebook…" : "Continue with Facebook"}
+  </Button>
+
+</div>
             </CardContent>
 
             <CardFooter className="flex flex-col gap-4">
-              <Button type="submit" className="w-full" disabled={submitting}>
-                {submitting ? "Signing in…" : "Sign in"}
-              </Button>
+             
 
               <p className="text-sm text-center text-muted-foreground">
                 New here?{" "}

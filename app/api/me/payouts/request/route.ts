@@ -88,8 +88,7 @@ export async function POST(req: NextRequest) {
 
   const amount = Number(body.amount || 0);
   const method: string = body.method || "manual"; // e.g. "manual", "upi", "bank"
-  const contact_email: string | null =
-    body.contact_email || user.email || null;
+  const contact_email: string | null = body.contact_email || user.email || null;
   const request_note: string | null = body.request_note || null;
 
   if (!(amount > 0)) {
@@ -119,10 +118,7 @@ export async function POST(req: NextRequest) {
   // Only commissions that are actually unlocked / withdrawable
   const approvedTotal = lifetimeRows
     .filter((r: any) => r.status === "approved")
-    .reduce(
-      (acc: number, r: any) => acc + Number(r.commission_amount || 0),
-      0
-    );
+    .reduce((acc: number, r: any) => acc + Number(r.commission_amount || 0), 0);
 
   const { data: payoutsAgg, error: payoutsErr } = await sb
     .from("influencer_payouts")
@@ -182,8 +178,8 @@ export async function POST(req: NextRequest) {
   }
 
   // ---- 3) Send AWS SES email to admin with payout details ----
-  const adminEmail = 'arunpandian972000@gmail.com'
-  const fromEmail = 'marketing@raceautoindia.com';
+  const adminEmail = "arunpandian972000@gmail.com";
+  const fromEmail = "marketing@raceautoindia.com";
 
   if (adminEmail && fromEmail) {
     try {
