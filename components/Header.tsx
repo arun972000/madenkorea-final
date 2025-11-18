@@ -169,12 +169,42 @@ export function Header() {
 
                 {/* 👉 Mobile CTA */}
                 <div className="px-5 py-3">
-                  <Button asChild className="w-full">
-                    <Link href="/influencer-request">Become a Partner</Link>
+                  <Button
+                    asChild
+                    className="w-full rounded-full bg-gradient-to-r from-pink-500 via-rose-500 to-amber-400 text-sm font-semibold text-white shadow-lg shadow-pink-500/50 animate-pulse hover:animate-none hover:scale-105 hover:shadow-pink-500/80 transition-transform transition-shadow duration-700"
+                  >
+                    <Link href="/influencer-request">K- PartnerUp</Link>
                   </Button>
                 </div>
 
-                <ScrollArea className="h-[calc(100dvh-5rem)] px-2 py-4">
+                {/* 👉 Mobile account & actions (icons moved here) */}
+                <div className="px-5 pb-3 flex items-center gap-2 md:hidden">
+                  <Button asChild variant="outline" className="flex-1">
+                    <Link href={isAuthenticated ? "/account" : "/auth/login"}>
+                      <User className="h-4 w-4 mr-2" /> Account
+                    </Link>
+                  </Button>
+                  <Button asChild variant="outline" className="flex-1">
+                    <Link href="/account/wishlist">
+                      <Heart className="h-4 w-4 mr-2" /> Wishlist
+                    </Link>
+                  </Button>
+                  <Button asChild variant="outline" className="flex-1">
+                    <Link href="/cart">
+                      <ShoppingCart className="h-4 w-4 mr-2" /> Cart
+                    </Link>
+                  </Button>
+                </div>
+
+                <Separator />
+
+                <ScrollArea className="h-[calc(100dvh-6.5rem)] px-2 py-4">
+                  {/* Mobile search inside sheet */}
+                  <div className="px-3 pb-3">
+                    <SearchAutocomplete />
+                  </div>
+                  <Separator className="mb-3" />
+
                   <nav className="px-3">
                     <Accordion type="multiple" className="w-full">
                       {/* Categories (mobile) */}
@@ -262,7 +292,7 @@ export function Header() {
               </SheetContent>
             </Sheet>
 
-            {/* Logo (desktop) */}
+            {/* Logo */}
             <Link href="/" className="flex items-center">
               <Image
                 src="/logo gif.gif"
@@ -276,7 +306,6 @@ export function Header() {
 
             {/* Desktop nav with dynamic dropdowns */}
             <nav className="hidden md:block">
-              {/* Removed plain text link; we render a proper button on the right cluster */}
               <NavigationMenu>
                 <NavigationMenuList>
                   {/* Categories (desktop) */}
@@ -369,21 +398,25 @@ export function Header() {
             </nav>
           </div>
 
-          {/* Right cluster: search + CTA + account/wishlist/cart */}
+          {/* Right cluster: search + CTA + account/wishlist/cart (desktop) */}
           <div className="flex items-center gap-1 sm:gap-2">
             <div className="hidden lg:block w-[360px]">
               <SearchAutocomplete />
             </div>
 
-            {/* Desktop CTA — match standard order button style */}
-            <Button asChild className="hidden md:inline-flex">
-              <Link href="/influencer-request">Become a Partner</Link>
+            {/* Become Partner visible everywhere, flashy */}
+            <Button
+              asChild
+              className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-pink-500 via-rose-500 to-amber-400 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-pink-500/50 animate-pulse hover:animate-none hover:scale-105 hover:shadow-pink-500/80 transition-transform transition-shadow duration-700"
+            >
+              <Link href="/influencer-request">K- PartnerUp</Link>
             </Button>
 
+            {/* Search toggle: only on md (tablet-ish), hidden on small mobile */}
             <Button
               variant="ghost"
               size="icon"
-              className="lg:hidden"
+              className="hidden md:inline-flex lg:hidden"
               onClick={() => setShowSearch((s) => !s)}
               aria-label="Toggle search"
             >
@@ -394,7 +427,14 @@ export function Header() {
               )}
             </Button>
 
-            <Button variant="ghost" size="icon" asChild aria-label="Account">
+            {/* Account / Wishlist / Cart hidden on mobile header, visible from md up */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="hidden md:inline-flex"
+              asChild
+              aria-label="Account"
+            >
               <Link href={isAuthenticated ? "/account" : "/auth/login"}>
                 <User className="h-5 w-5" />
                 <span className="sr-only">Account</span>
@@ -404,7 +444,7 @@ export function Header() {
             <Button
               variant="ghost"
               size="icon"
-              className="relative"
+              className="relative hidden md:inline-flex"
               asChild
               aria-label="Wishlist"
             >
@@ -425,7 +465,7 @@ export function Header() {
             <Button
               variant="ghost"
               size="icon"
-              className="relative"
+              className="relative hidden md:inline-flex"
               asChild
               aria-label="Cart"
             >
@@ -445,7 +485,7 @@ export function Header() {
           </div>
         </div>
 
-        {/* Mobile search bar */}
+        {/* Mobile search bar (only when toggled on md) */}
         {showSearch && (
           <div className="lg:hidden pb-3 px-0.5">
             <SearchAutocomplete />
