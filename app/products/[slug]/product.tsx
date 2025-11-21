@@ -1211,7 +1211,7 @@ const isVideoSelected = selectedImage === imageUrls.length && !!videoUrl;
                           key={t.key}
                           value={t.key}
                           ref={(el) => (tabBtnRefs.current[t.key] = el)}
-                          className="flex-shrink-0 whitespace-nowrap px-3 py-2 text-xs sm:text-lg snap-start"
+                          className="flex-shrink-0 whitespace-nowrap px-3 py-2 text-md sm:text-lg snap-start"
                         >
                           {t.label}
                         </TabsTrigger>
