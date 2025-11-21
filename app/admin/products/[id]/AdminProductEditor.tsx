@@ -470,18 +470,38 @@ export function AdminProductEditor({ productId }: { productId: string }) {
           </section>
 
           {/* Copy */}
-          <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <Label>Short description</Label>
-              <Textarea rows={3} value={model.short_description}
-                onChange={e => setModel(m => m ? ({...m, short_description: e.target.value}) : m)} />
-            </div>
-            <div>
-              <Label>Description</Label>
-              <Textarea rows={6} value={model.description}
-                onChange={e => setModel(m => m ? ({...m, description: e.target.value}) : m)} />
-            </div>
-          </section>
+
+<section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+  <div>
+    <Label>Short description</Label>
+    <Textarea
+      rows={3}
+      value={model.short_description}
+      onChange={e =>
+        setModel(m => (m ? { ...m, short_description: e.target.value } : m))
+      }
+    />
+  </div>
+
+  <div>
+    <Label>Description (markdown)</Label>
+    <Textarea
+      rows={6}
+      value={model.description}
+      placeholder={`Example:
+- High-potency vitamin C serum
+- Brightens and evens skin tone
+- Reduces fine lines and boosts elasticity`}
+      onChange={e =>
+        setModel(m => (m ? { ...m, description: e.target.value } : m))
+      }
+    />
+    <p className="mt-1 text-xs text-muted-foreground">
+      Supports basic markdown: headings, lists, **bold**, etc.
+    </p>
+  </div>
+</section>
+
 
           {/* Pricing & Publish */}
           <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
