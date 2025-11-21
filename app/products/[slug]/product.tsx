@@ -521,11 +521,28 @@ const isVideoSelected = selectedImage === imageUrls.length && !!videoUrl;
   }, [product]);
 
   // Helper: render markdown safely
-  const Markdown = ({ children }: { children: string }) => (
-    <div className="prose prose-sm max-w-none">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{children}</ReactMarkdown>
-    </div>
-  );
+// Helper: render markdown safely
+const Markdown = ({ children }: { children: string }) => (
+  <div className="prose prose-sm max-w-none">
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        ul: ({ node, ...props }) => (
+          <ul className="list-disc ml-4 space-y-1" {...props} />
+        ),
+        ol: ({ node, ...props }) => (
+          <ol className="list-decimal ml-4 space-y-1" {...props} />
+        ),
+        li: ({ node, ...props }) => (
+          <li className="leading-relaxed" {...props} />
+        ),
+      }}
+    >
+      {children}
+    </ReactMarkdown>
+  </div>
+);
+
 
   /* ---------------- Reviews: fetch stats + list ---------------- */
   const pageSize = 10;
