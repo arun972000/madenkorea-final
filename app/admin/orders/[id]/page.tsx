@@ -1,29 +1,79 @@
 'use client';
 
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { LogOut, Package, Truck, CheckCircle, XCircle, Clock } from 'lucide-react';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  LogOut,
+  Package,
+  Truck,
+  CheckCircle,
+  XCircle,
+  Clock,
+} from 'lucide-react';
 import { toast } from 'sonner';
-import { useState } from 'react';
+import { createClient } from '@supabase/supabase-js';
 
-export default function OrderDetailPage() {
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  {
+    auth: { persistSession: true, autoRefreshToken: true },
+  }
+);
+
+function formatINR(v?: number | null, currency?: string | null) {
+  if (v == null) return '';
+  const code = (currency ?? 'INR').toUpperCase();
+  if (code === 'INR') return `₹${v.toLocaleString('en-IN')}`;
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: code,
+    }).format(v);
+  } catch {
+    return `${code} ${v.toLocaleString()}`;
+  }
+}
+
+export default function AdminOrderDetailPage() {
   const params = useParams();
   const router = useRouter();
   const { user, hasRole, logout } = useAuth();
   const orderId = params.id as string;
 
-  const [orderStatus, setOrderStatus] = useState('processing');
+  const [order, setOrder] = useState<any | null>(null);
+  const [items, setItems] = useState<any[]>([]);
+  const [payment, setPayment] = useState<any | null>(null);
+  const [orderStatus, setOrderStatus] = useState<string>('processing');
+  const [loading, setLoading] = useState<boolean>(true);
 
-  if (!hasRole('admin')) {
-    router.push('/admin');
-    return null;
-  }
+  const isAdmin = hasRole('admin');
 
   const handleLogout = async () => {
     await logout();
@@ -31,82 +81,77 @@ export default function OrderDetailPage() {
     router.push('/');
   };
 
-  const mockOrderDetails = {
-    id: orderId,
-    orderNumber: orderId,
-    date: '2024-10-08T10:30:00',
-    status: orderStatus,
-    paymentStatus: 'paid',
-    paymentMethod: 'Card',
-    customer: {
-      name: 'Sarah Johnson',
-      email: 'sarah@example.com',
-      phone: '+91 98765 43210',
-    },
-    shippingAddress: {
-      name: 'Sarah Johnson',
-      address: '123 Main Street, Apt 4B',
-      city: 'Mumbai',
-      state: 'Maharashtra',
-      pincode: '400001',
-      phone: '+91 98765 43210',
-    },
-    billingAddress: {
-      name: 'Sarah Johnson',
-      address: '123 Main Street, Apt 4B',
-      city: 'Mumbai',
-      state: 'Maharashtra',
-      pincode: '400001',
-      phone: '+91 98765 43210',
-    },
-    items: [
-      {
-        id: '1',
-        name: 'Korean Essence Toner',
-        image: 'https://images.pexels.com/photos/7728095/pexels-photo-7728095.jpeg?auto=compress&cs=tinysrgb&w=200',
-        sku: 'KET-001',
-        quantity: 2,
-        price: 899,
-        total: 1798,
-      },
-      {
-        id: '2',
-        name: 'Vitamin C Serum',
-        image: 'https://images.pexels.com/photos/7728091/pexels-photo-7728091.jpeg?auto=compress&cs=tinysrgb&w=200',
-        sku: 'VCS-002',
-        quantity: 1,
-        price: 1299,
-        total: 1299,
-      },
-    ],
-    subtotal: 3097,
-    shipping: 100,
-    discount: 200,
-    tax: 502,
-    total: 3499,
-    timeline: [
-      {
-        status: 'Order Placed',
-        date: '2024-10-08T10:30:00',
-        description: 'Order has been placed successfully',
-        icon: Package,
-      },
-      {
-        status: 'Payment Confirmed',
-        date: '2024-10-08T10:31:00',
-        description: 'Payment received and confirmed',
-        icon: CheckCircle,
-      },
-      {
-        status: 'Processing',
-        date: '2024-10-08T11:00:00',
-        description: 'Order is being prepared',
-        icon: Clock,
-      },
-    ],
-  };
+  // Redirect non-admins safely (inside an effect)
+  useEffect(() => {
+    if (user && !isAdmin) {
+      router.push('/admin');
+    }
+  }, [user, isAdmin, router]);
+
+  // Load order + items + latest payment
+  useEffect(() => {
+    if (!orderId || !user || !isAdmin) return;
+
+    const load = async () => {
+      try {
+        setLoading(true);
+
+        const { data: ord, error: oErr } = await supabase
+          .from('orders')
+          .select(
+            'id, order_number, status, currency, subtotal, shipping_fee, discount_total, total, address_snapshot, created_at, user_id'
+          )
+          .eq('id', orderId)
+          .maybeSingle();
+
+        if (oErr || !ord) {
+          console.error('Admin order: order error', oErr);
+          toast.error('Order not found');
+          setLoading(false);
+          return;
+        }
+
+        setOrder(ord);
+        setOrderStatus(ord.status ?? 'processing');
+
+        const [{ data: its, error: iErr }, { data: pays, error: pErr }] =
+          await Promise.all([
+            supabase
+              .from('order_items')
+              .select(
+                'product_id, sku, name, quantity, unit_price, line_total, mrp, hero_image_path'
+              )
+              .eq('order_id', orderId),
+            supabase
+              .from('payments')
+              .select('*')
+              .eq('order_id', orderId)
+              .order('created_at', { ascending: false })
+              .limit(1),
+          ]);
+
+        if (iErr) {
+          console.error('Admin order: items error', iErr);
+        }
+        if (pErr) {
+          console.error('Admin order: payments error', pErr);
+        }
+
+        setItems(its ?? []);
+        setPayment((pays ?? [])[0] ?? null);
+      } catch (err) {
+        console.error('Admin order: fatal error', err);
+        toast.error('Failed to load order');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    load();
+  }, [orderId, user, isAdmin]);
 
   const handleStatusUpdate = (newStatus: string) => {
+    // For now only local state (no DB update yet)
     setOrderStatus(newStatus);
     toast.success(`Order status updated to ${newStatus}`);
   };
@@ -114,13 +159,21 @@ export default function OrderDetailPage() {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'pending':
+      case 'pending_payment':
+      case 'created':
         return <Badge variant="outline">{status}</Badge>;
       case 'processing':
+      case 'paid':
         return <Badge variant="secondary">{status}</Badge>;
       case 'dispatched':
+      case 'shipped':
         return <Badge variant="default">{status}</Badge>;
       case 'delivered':
-        return <Badge variant="default" className="bg-green-500">{status}</Badge>;
+        return (
+          <Badge variant="default" className="bg-green-500">
+            {status}
+          </Badge>
+        );
       case 'cancelled':
         return <Badge variant="destructive">{status}</Badge>;
       case 'returned':
@@ -129,6 +182,124 @@ export default function OrderDetailPage() {
         return <Badge>{status}</Badge>;
     }
   };
+
+  const timeline = useMemo(() => {
+    if (!order) return [];
+    const events: {
+      status: string;
+      date: string;
+      description: string;
+      icon: any;
+    }[] = [];
+
+    // Order placed
+    events.push({
+      status: 'Order Placed',
+      date: order.created_at,
+      description: 'Order has been placed successfully',
+      icon: Package,
+    });
+
+    // Payment confirmed
+    if (payment) {
+      events.push({
+        status: 'Payment Confirmed',
+        date: payment.created_at,
+        description: `Payment received via ${payment.method || 'Razorpay'}`,
+        icon: CheckCircle,
+      });
+    }
+
+    // Current status
+    const normalizedStatus = orderStatus || order.status;
+    if (normalizedStatus && normalizedStatus !== 'pending') {
+      let desc = 'Order is being processed';
+      let IconComp: any = Clock;
+      if (normalizedStatus === 'dispatched' || normalizedStatus === 'shipped') {
+        desc = 'Order has been dispatched';
+        IconComp = Truck;
+      } else if (normalizedStatus === 'delivered') {
+        desc = 'Order delivered to customer';
+        IconComp = CheckCircle;
+      } else if (normalizedStatus === 'cancelled') {
+        desc = 'Order has been cancelled';
+        IconComp = XCircle;
+      } else if (normalizedStatus === 'returned') {
+        desc = 'Order returned by customer';
+        IconComp = XCircle;
+      }
+
+      events.push({
+        status:
+          normalizedStatus.charAt(0).toUpperCase() +
+          normalizedStatus.slice(1),
+        date: payment?.created_at || order.created_at,
+        description: desc,
+        icon: IconComp,
+      });
+    }
+
+    return events;
+  }, [order, payment, orderStatus]);
+
+  // After all hooks: if not admin, render nothing (redirect handled above)
+  if (!isAdmin) {
+    return null;
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-muted/30">
+        <header className="border-b bg-background">
+          <div className="container mx-auto py-4 flex justify-between items-center">
+            <div className="flex items-center gap-4">
+              <Button variant="ghost" disabled>
+                ← Back to Orders
+              </Button>
+              <h1 className="text-2xl font-bold">Order Details</h1>
+            </div>
+          </div>
+        </header>
+        <div className="container mx-auto py-8 text-muted-foreground">
+          Loading order…
+        </div>
+      </div>
+    );
+  }
+
+  if (!order) {
+    return (
+      <div className="min-h-screen bg-muted/30">
+        <header className="border-b bg-background">
+          <div className="container mx-auto py-4 flex justify-between items-center">
+            <div className="flex items-center gap-4">
+              <Button variant="ghost" onClick={() => router.push('/admin/orders')}>
+                ← Back to Orders
+              </Button>
+              <h1 className="text-2xl font-bold">Order Details</h1>
+            </div>
+          </div>
+        </header>
+        <div className="container mx-auto py-8 text-muted-foreground">
+          Order not found.
+        </div>
+      </div>
+    );
+  }
+
+  const shippingAddress = order.address_snapshot || {};
+  const billingAddress = order.address_snapshot || {};
+  const currency = order.currency || 'INR';
+  const subtotal = Number(order.subtotal || 0);
+  const shippingFee = Number(order.shipping_fee || 0);
+  const discountTotal = Number(order.discount_total || 0);
+  const total = Number(order.total || 0);
+
+  const paymentMethod = payment?.method || 'Razorpay';
+  const paymentStatus =
+    order.status === 'paid' || order.status === 'delivered'
+      ? 'paid'
+      : order.status || 'pending';
 
   return (
     <div className="min-h-screen bg-muted/30">
@@ -157,19 +328,33 @@ export default function OrderDetailPage() {
               <CardHeader>
                 <div className="flex justify-between items-start">
                   <div>
-                    <CardTitle>Order #{mockOrderDetails.orderNumber}</CardTitle>
+                    <CardTitle>
+                      Order #{order.order_number || order.id}
+                    </CardTitle>
                     <CardDescription>
-                      Placed on {new Date(mockOrderDetails.date).toLocaleString()}
+                      Placed on{' '}
+                      {new Date(order.created_at).toLocaleString('en-IN', {
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
                     </CardDescription>
                   </div>
-                  {getStatusBadge(mockOrderDetails.status)}
+                  {getStatusBadge(orderStatus)}
                 </div>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
                   <div>
-                    <Label className="text-sm font-medium">Update Order Status</Label>
-                    <Select value={orderStatus} onValueChange={handleStatusUpdate}>
+                    <Label className="text-sm font-medium">
+                      Update Order Status
+                    </Label>
+                    <Select
+                      value={orderStatus}
+                      onValueChange={handleStatusUpdate}
+                    >
                       <SelectTrigger className="mt-2">
                         <SelectValue />
                       </SelectTrigger>
@@ -177,6 +362,7 @@ export default function OrderDetailPage() {
                         <SelectItem value="pending">Pending</SelectItem>
                         <SelectItem value="processing">Processing</SelectItem>
                         <SelectItem value="dispatched">Dispatched</SelectItem>
+                        <SelectItem value="shipped">Shipped</SelectItem>
                         <SelectItem value="delivered">Delivered</SelectItem>
                         <SelectItem value="cancelled">Cancelled</SelectItem>
                         <SelectItem value="returned">Returned</SelectItem>
@@ -192,65 +378,72 @@ export default function OrderDetailPage() {
                 <CardTitle>Order Items</CardTitle>
               </CardHeader>
               <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Product</TableHead>
-                      <TableHead>SKU</TableHead>
-                      <TableHead>Qty</TableHead>
-                      <TableHead>Price</TableHead>
-                      <TableHead>Total</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {mockOrderDetails.items.map((item) => (
-                      <TableRow key={item.id}>
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            <img
-                              src={item.image}
-                              alt={item.name}
-                              className="w-12 h-12 rounded object-cover"
-                            />
-                            <span className="font-medium">{item.name}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>{item.sku}</TableCell>
-                        <TableCell>{item.quantity}</TableCell>
-                        <TableCell>₹{item.price.toLocaleString('en-IN')}</TableCell>
-                        <TableCell>₹{item.total.toLocaleString('en-IN')}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                {items.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No items found for this order.
+                  </p>
+                ) : (
+                  <>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Product</TableHead>
+                          <TableHead>SKU</TableHead>
+                          <TableHead>Qty</TableHead>
+                          <TableHead>Price</TableHead>
+                          <TableHead>Total</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {items.map((item, idx) => (
+                          <TableRow key={idx}>
+                            <TableCell>
+                              <div className="flex items-center gap-3">
+                                <span className="font-medium">{item.name}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell>{item.sku}</TableCell>
+                            <TableCell>{item.quantity}</TableCell>
+                            <TableCell>
+                              {formatINR(item.unit_price, currency)}
+                            </TableCell>
+                            <TableCell>
+                              {formatINR(item.line_total, currency)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
 
-                <Separator className="my-4" />
+                    <Separator className="my-4" />
 
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Subtotal</span>
-                    <span>₹{mockOrderDetails.subtotal.toLocaleString('en-IN')}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Shipping</span>
-                    <span>₹{mockOrderDetails.shipping.toLocaleString('en-IN')}</span>
-                  </div>
-                  {mockOrderDetails.discount > 0 && (
-                    <div className="flex justify-between text-sm text-green-600">
-                      <span>Discount</span>
-                      <span>-₹{mockOrderDetails.discount.toLocaleString('en-IN')}</span>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Subtotal</span>
+                        <span>{formatINR(subtotal, currency)}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Shipping</span>
+                        <span>
+                          {shippingFee === 0
+                            ? 'FREE'
+                            : formatINR(shippingFee, currency)}
+                        </span>
+                      </div>
+                      {discountTotal > 0 && (
+                        <div className="flex justify-between text-sm text-green-600">
+                          <span>Discount</span>
+                          <span>-{formatINR(discountTotal, currency)}</span>
+                        </div>
+                      )}
+                      <Separator />
+                      <div className="flex justify-between font-bold text-lg">
+                        <span>Total</span>
+                        <span>{formatINR(total, currency)}</span>
+                      </div>
                     </div>
-                  )}
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Tax</span>
-                    <span>₹{mockOrderDetails.tax.toLocaleString('en-IN')}</span>
-                  </div>
-                  <Separator />
-                  <div className="flex justify-between font-bold text-lg">
-                    <span>Total</span>
-                    <span>₹{mockOrderDetails.total.toLocaleString('en-IN')}</span>
-                  </div>
-                </div>
+                  </>
+                )}
               </CardContent>
             </Card>
 
@@ -260,30 +453,38 @@ export default function OrderDetailPage() {
                 <CardDescription>Track the order progress</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  {mockOrderDetails.timeline.map((event, index) => {
-                    const Icon = event.icon;
-                    return (
-                      <div key={index} className="flex gap-4">
-                        <div className="flex flex-col items-center">
-                          <div className="flex items-center justify-center w-10 h-10 rounded-full bg-primary/10">
-                            <Icon className="h-5 w-5 text-primary" />
+                {timeline.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No timeline events.
+                  </p>
+                ) : (
+                  <div className="space-y-4">
+                    {timeline.map((event, index) => {
+                      const Icon = event.icon;
+                      return (
+                        <div key={index} className="flex gap-4">
+                          <div className="flex flex-col items-center">
+                            <div className="flex items-center justify-center w-10 h-10 rounded-full bg-primary/10">
+                              <Icon className="h-5 w-5 text-primary" />
+                            </div>
+                            {index < timeline.length - 1 && (
+                              <div className="w-0.5 h-full bg-border mt-2" />
+                            )}
                           </div>
-                          {index < mockOrderDetails.timeline.length - 1 && (
-                            <div className="w-0.5 h-full bg-border mt-2" />
-                          )}
+                          <div className="flex-1 pb-4">
+                            <h4 className="font-medium">{event.status}</h4>
+                            <p className="text-sm text-muted-foreground">
+                              {event.description}
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {new Date(event.date).toLocaleString('en-IN')}
+                            </p>
+                          </div>
                         </div>
-                        <div className="flex-1 pb-4">
-                          <h4 className="font-medium">{event.status}</h4>
-                          <p className="text-sm text-muted-foreground">{event.description}</p>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            {new Date(event.date).toLocaleString()}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -295,9 +496,18 @@ export default function OrderDetailPage() {
               </CardHeader>
               <CardContent className="space-y-3">
                 <div>
-                  <p className="text-sm font-medium">{mockOrderDetails.customer.name}</p>
-                  <p className="text-sm text-muted-foreground">{mockOrderDetails.customer.email}</p>
-                  <p className="text-sm text-muted-foreground">{mockOrderDetails.customer.phone}</p>
+                  <p className="text-sm font-medium">
+                    {shippingAddress.name || 'Guest'}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {shippingAddress.email || '—'}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {shippingAddress.phone || '—'}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    User ID: {order.user_id || 'guest'}
+                  </p>
                 </div>
               </CardContent>
             </Card>
@@ -308,13 +518,21 @@ export default function OrderDetailPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-sm space-y-1">
-                  <p className="font-medium">{mockOrderDetails.shippingAddress.name}</p>
-                  <p className="text-muted-foreground">{mockOrderDetails.shippingAddress.address}</p>
-                  <p className="text-muted-foreground">
-                    {mockOrderDetails.shippingAddress.city}, {mockOrderDetails.shippingAddress.state}
+                  <p className="font-medium">
+                    {shippingAddress.name || '—'}
                   </p>
-                  <p className="text-muted-foreground">{mockOrderDetails.shippingAddress.pincode}</p>
-                  <p className="text-muted-foreground">{mockOrderDetails.shippingAddress.phone}</p>
+                  <p className="text-muted-foreground">
+                    {shippingAddress.address || '—'}
+                  </p>
+                  <p className="text-muted-foreground">
+                    {shippingAddress.city || '—'}, {shippingAddress.state || ''}
+                  </p>
+                  <p className="text-muted-foreground">
+                    {shippingAddress.pincode || '—'}
+                  </p>
+                  <p className="text-muted-foreground">
+                    {shippingAddress.phone || '—'}
+                  </p>
                 </div>
               </CardContent>
             </Card>
@@ -325,13 +543,21 @@ export default function OrderDetailPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-sm space-y-1">
-                  <p className="font-medium">{mockOrderDetails.billingAddress.name}</p>
-                  <p className="text-muted-foreground">{mockOrderDetails.billingAddress.address}</p>
-                  <p className="text-muted-foreground">
-                    {mockOrderDetails.billingAddress.city}, {mockOrderDetails.billingAddress.state}
+                  <p className="font-medium">
+                    {billingAddress.name || '—'}
                   </p>
-                  <p className="text-muted-foreground">{mockOrderDetails.billingAddress.pincode}</p>
-                  <p className="text-muted-foreground">{mockOrderDetails.billingAddress.phone}</p>
+                  <p className="text-muted-foreground">
+                    {billingAddress.address || '—'}
+                  </p>
+                  <p className="text-muted-foreground">
+                    {billingAddress.city || '—'}, {billingAddress.state || ''}
+                  </p>
+                  <p className="text-muted-foreground">
+                    {billingAddress.pincode || '—'}
+                  </p>
+                  <p className="text-muted-foreground">
+                    {billingAddress.phone || '—'}
+                  </p>
                 </div>
               </CardContent>
             </Card>
@@ -343,14 +569,25 @@ export default function OrderDetailPage() {
               <CardContent className="space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Payment Method</span>
-                  <span className="font-medium">{mockOrderDetails.paymentMethod}</span>
+                  <span className="font-medium">{paymentMethod}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Payment Status</span>
-                  <Badge variant="default" className="bg-green-500">
-                    {mockOrderDetails.paymentStatus}
+                  <Badge
+                    variant={paymentStatus === 'paid' ? 'default' : 'outline'}
+                    className={paymentStatus === 'paid' ? 'bg-green-500' : ''}
+                  >
+                    {paymentStatus}
                   </Badge>
                 </div>
+                {payment?.provider_payment_id && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Provider Ref</span>
+                    <span className="font-medium">
+                      {payment.provider_payment_id}
+                    </span>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -360,6 +597,12 @@ export default function OrderDetailPage() {
   );
 }
 
-function Label({ children, className }: { children: React.ReactNode; className?: string }) {
+function Label({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
   return <label className={className}>{children}</label>;
 }

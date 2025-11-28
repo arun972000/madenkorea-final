@@ -160,7 +160,7 @@ export default function InvoicePage() {
 
           {/* Footer note */}
           <div className="mt-6 text-xs text-muted-foreground">
-            This is a computer generated invoice. For support, contact info@madeinkorea.com
+            This is a computer generated invoice. For support, contact info@madenkorea.com
           </div>
         </CardContent>
       </Card>

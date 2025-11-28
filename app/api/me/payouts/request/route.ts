@@ -178,8 +178,8 @@ export async function POST(req: NextRequest) {
   }
 
   // ---- 3) Send AWS SES email to admin with payout details ----
-  const adminEmail = "arunpandian972000@gmail.com";
-  const fromEmail = "marketing@raceautoindia.com";
+  const adminEmail = "operations@madenkorea.com";
+  const fromEmail = "info@madenkorea.com";
 
   if (adminEmail && fromEmail) {
     try {

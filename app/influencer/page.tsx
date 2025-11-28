@@ -64,7 +64,10 @@ type WalletData = {
 };
 
 // total split cap
-const MAX_SPLIT = 20;
+const MAX_SPLIT = 25;
+
+const RECOMMENDED_USER = 10;
+const RECOMMENDED_COMM = MAX_SPLIT - RECOMMENDED_USER;
 
 /* ---------- Page ---------- */
 export default function InfluencerDashboardPage() {
@@ -498,13 +501,13 @@ export default function InfluencerDashboardPage() {
               type="button"
               className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs"
               onClick={() => {
-                setUserPct(10);
-                setCommPct(MAX_SPLIT - 10);
+                setUserPct(RECOMMENDED_USER);
+    setCommPct(RECOMMENDED_COMM);
                 setUserPctError(null);
                 setCodeError(null);
               }}
             >
-              <Check className="h-4 w-4" /> Recommended 10% + 10%
+              <Check className="h-4 w-4" /> Recommended {RECOMMENDED_USER}% + {RECOMMENDED_COMM}%
             </button>
             <p className="text-[11px] text-neutral-600">
               Split total: {sumPct}% of {MAX_SPLIT}% cap.

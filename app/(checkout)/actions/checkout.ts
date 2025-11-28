@@ -57,7 +57,7 @@ export async function checkout({
   const byId = new Map(products?.map(p => [p.id, p]));
   const orderItems = lines.map(l => {
     const p = byId.get(l.product_id)!;
-    const unit = (p?.sale_price ?? p?.price) ?? 0; // keep aligned with effectiveUnitPrice if you have that column too
+    const unit = (p?.sale_price) ?? 0; // keep aligned with effectiveUnitPrice if you have that column too
     return {
       order_id: orderId,
       product_id: l.product_id,

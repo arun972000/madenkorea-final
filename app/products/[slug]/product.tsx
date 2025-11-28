@@ -36,7 +36,7 @@ import {
   Mail,
   MessageCircle,
   Send,
- PlayCircle
+  PlayCircle,
 } from "lucide-react";
 import { CustomerLayout } from "@/components/CustomerLayout";
 import { Button } from "@/components/ui/button";
@@ -411,16 +411,15 @@ export default function ProductPage() {
       ? [storagePublicUrl(product.hero_image_path) || ""]
       : [];
     return gallery.filter(Boolean);
-    
   }, [images, product?.hero_image_path]);
 
   const videoUrl = useMemo(
-  () => storagePublicUrl(product?.video_path ?? null),
-  [product?.video_path]
-);
+    () => storagePublicUrl(product?.video_path ?? null),
+    [product?.video_path]
+  );
 
-const galleryCount = imageUrls.length + (videoUrl ? 1 : 0);
-const isVideoSelected = selectedImage === imageUrls.length && !!videoUrl;
+  const galleryCount = imageUrls.length + (videoUrl ? 1 : 0);
+  const isVideoSelected = selectedImage === imageUrls.length && !!videoUrl;
 
   const inWishlist = product ? isInWishlist(product.id) : false;
 
@@ -521,28 +520,27 @@ const isVideoSelected = selectedImage === imageUrls.length && !!videoUrl;
   }, [product]);
 
   // Helper: render markdown safely
-// Helper: render markdown safely
-const Markdown = ({ children }: { children: string }) => (
-  <div className="prose prose-sm max-w-none">
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      components={{
-        ul: ({ node, ...props }) => (
-          <ul className="list-disc ml-4 space-y-1" {...props} />
-        ),
-        ol: ({ node, ...props }) => (
-          <ol className="list-decimal ml-4 space-y-1" {...props} />
-        ),
-        li: ({ node, ...props }) => (
-          <li className="leading-relaxed" {...props} />
-        ),
-      }}
-    >
-      {children}
-    </ReactMarkdown>
-  </div>
-);
-
+  // Helper: render markdown safely
+  const Markdown = ({ children }: { children: string }) => (
+    <div className="prose prose-sm max-w-none">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          ul: ({ node, ...props }) => (
+            <ul className="list-disc ml-4 space-y-1" {...props} />
+          ),
+          ol: ({ node, ...props }) => (
+            <ol className="list-decimal ml-4 space-y-1" {...props} />
+          ),
+          li: ({ node, ...props }) => (
+            <li className="leading-relaxed" {...props} />
+          ),
+        }}
+      >
+        {children}
+      </ReactMarkdown>
+    </div>
+  );
 
   /* ---------------- Reviews: fetch stats + list ---------------- */
   const pageSize = 10;
@@ -902,87 +900,97 @@ const Markdown = ({ children }: { children: string }) => (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 lg:gap-12">
               {/* GALLERY */}
               <div>
-               <div className="relative aspect-square mb-4 bg-muted rounded-lg overflow-hidden group">
-  {isVideoSelected && videoUrl ? (
-    <video
-      key={videoUrl} /* force refresh when switching */
-      src={videoUrl}
-      controls
-      autoPlay
-      playsInline
-      className="w-full h-full object-cover" /* fills without side black bars */
-    />
-  ) : imageUrls[selectedImage] ? (
-    <Image
-      src={imageUrls[selectedImage]}
-      alt={images[selectedImage]?.alt || product.name}
-      fill
-      className="object-cover"
-    />
-  ) : (
-    <div className="w-full h-full bg-muted" />
-  )}
+                <div className="relative aspect-square mb-4 bg-muted rounded-lg overflow-hidden group">
+                  {isVideoSelected && videoUrl ? (
+                    <video
+                      key={videoUrl} /* force refresh when switching */
+                      src={videoUrl}
+                      controls
+                      autoPlay
+                      playsInline
+                      className="w-full h-full object-cover" /* fills without side black bars */
+                    />
+                  ) : imageUrls[selectedImage] ? (
+                    <Image
+                      src={imageUrls[selectedImage]}
+                      alt={images[selectedImage]?.alt || product.name}
+                      fill
+                      className="object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-muted" />
+                  )}
 
-  {discount > 0 && (
-    <Badge className="absolute top-4 left-4" variant="destructive">
-      {discount}% OFF
-    </Badge>
-  )}
+                  {discount > 0 && (
+                    <Badge
+                      className="absolute top-4 left-4"
+                      variant="destructive"
+                    >
+                      {discount}% OFF
+                    </Badge>
+                  )}
 
-  {/* Hide zoom on video; keep it for images */}
-  {!isVideoSelected && (
-    <Button
-      variant="secondary"
-      size="icon"
-      className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity"
-      onClick={() => setShowZoom(true)}
-    >
-      <ZoomIn className="h-5 w-5" />
-    </Button>
-  )}
-</div>
+                  {/* Hide zoom on video; keep it for images */}
+                  {!isVideoSelected && (
+                    <Button
+                      variant="secondary"
+                      size="icon"
+                      className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={() => setShowZoom(true)}
+                    >
+                      <ZoomIn className="h-5 w-5" />
+                    </Button>
+                  )}
+                </div>
 
+                {galleryCount > 1 && (
+                  <div className="grid grid-cols-4 gap-2">
+                    {/* image thumbs */}
+                    {imageUrls.map((src, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => setSelectedImage(idx)}
+                        className={`relative aspect-square rounded-lg overflow-hidden border-2 ${
+                          selectedImage === idx
+                            ? "border-primary"
+                            : "border-transparent"
+                        }`}
+                      >
+                        <Image
+                          src={src}
+                          alt={`${product.name} ${idx + 1}`}
+                          fill
+                          className="object-cover"
+                        />
+                      </button>
+                    ))}
 
-               {galleryCount > 1 && (
-  <div className="grid grid-cols-4 gap-2">
-    {/* image thumbs */}
-    {imageUrls.map((src, idx) => (
-      <button
-        key={idx}
-        onClick={() => setSelectedImage(idx)}
-        className={`relative aspect-square rounded-lg overflow-hidden border-2 ${
-          selectedImage === idx ? "border-primary" : "border-transparent"
-        }`}
-      >
-        <Image src={src} alt={`${product.name} ${idx + 1}`} fill className="object-cover" />
-      </button>
-    ))}
-
-    {/* video thumb (last) */}
-    {videoUrl && (
-      <button
-        onClick={() => setSelectedImage(imageUrls.length)}
-        className={`relative aspect-square rounded-lg overflow-hidden border-2 ${
-          isVideoSelected ? "border-primary" : "border-transparent"
-        }`}
-        aria-label="Product video"
-        title="Product video"
-      >
-        <video
-          src={videoUrl}
-          muted
-          playsInline
-          preload="metadata"
-          className="absolute inset-0 w-full h-full object-cover"
-        />
-        <div className="absolute inset-0 bg-black/30 grid place-items-center">
-          <PlayCircle className="h-8 w-8 text-white drop-shadow" />
-        </div>
-      </button>
-    )}
-  </div>
-)}
-
+                    {/* video thumb (last) */}
+                    {videoUrl && (
+                      <button
+                        onClick={() => setSelectedImage(imageUrls.length)}
+                        className={`relative aspect-square rounded-lg overflow-hidden border-2 ${
+                          isVideoSelected
+                            ? "border-primary"
+                            : "border-transparent"
+                        }`}
+                        aria-label="Product video"
+                        title="Product video"
+                      >
+                        <video
+                          src={videoUrl}
+                          muted
+                          playsInline
+                          preload="metadata"
+                          className="absolute inset-0 w-full h-full object-cover"
+                        />
+                        <div className="absolute inset-0 bg-black/30 grid place-items-center">
+                          <PlayCircle className="h-8 w-8 text-white drop-shadow" />
+                        </div>
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* DETAILS */}
@@ -1259,19 +1267,18 @@ const Markdown = ({ children }: { children: string }) => (
 
                   {/* Description */}
 
-{hasDescription && (
-  <TabsContent value="description" className="mt-6">
-    <Card>
-      <CardContent className="p-6 space-y-4">
-        {/* <h3 className="text-base font-semibold">Overview</h3> */}
-        {product?.description && (
-          <Markdown>{product.description}</Markdown>
-        )}
-      </CardContent>
-    </Card>
-  </TabsContent>
-)}
-
+                  {hasDescription && (
+                    <TabsContent value="description" className="mt-6">
+                      <Card>
+                        <CardContent className="p-6 space-y-4">
+                          {/* <h3 className="text-base font-semibold">Overview</h3> */}
+                          {product?.description && (
+                            <Markdown>{product.description}</Markdown>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </TabsContent>
+                  )}
 
                   {/* Ingredients */}
                   {hasIngredients && (

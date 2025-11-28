@@ -3,6 +3,8 @@ import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 
+const CAP_PERCENT = 25;
+
 async function withUser(req: NextRequest) {
   const cookieStore = cookies();
   const sbCookies = createServerClient(
@@ -93,9 +95,12 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
-  if (u + c > 20.0001) {
+if (u + c > CAP_PERCENT + 0.0001) {
     return NextResponse.json(
-      { ok: false, error: "Customer% + You% must be ≤ 20" },
+      {
+        ok: false,
+        error: `Customer% + You% must be ≤ ${CAP_PERCENT}`,
+      },
       { status: 400 }
     );
   }
@@ -106,7 +111,7 @@ export async function POST(req: NextRequest) {
     product_id: null, // GLOBAL
     discount_percent: u,
     commission_percent: c,
-    cap_percent: 20, // global cap
+    cap_percent: CAP_PERCENT, // global cap
     active: true,
   };
 

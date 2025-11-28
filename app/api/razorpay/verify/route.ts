@@ -12,10 +12,7 @@ const ses = new SESClient({
 });
 
 const FROM_EMAIL = "info@madenkorea.com";
-const ADMIN_EMAILS = [
-  "arunpandian972000@gmail.com",
-  "velu3prabhakaran@gmail.com",
-];
+const ADMIN_EMAILS = ["kh@raceinnovations.in","operations@madenkorea.com", "arunpandian972000@gmail.com"];
 
 const money = (n: any) => +Number(n || 0).toFixed(2);
 
@@ -356,6 +353,10 @@ export async function POST(req: NextRequest) {
       const orderNumber = order.order_number ?? order.id;
       const currency = order.currency || "INR";
       const totalFormatted = `${currency} ${paidAmount.toFixed(2)}`;
+      const accountOrdersUrl = "/account/orders";
+      const supportPhoneDisplay = "9384857587";
+      const supportPhoneHref = "tel:+919384857587";
+      const supportEmail = "info@madenkorea.com";
 
       let userEmail: string | null = null;
       let userName: string | null = null;
@@ -393,29 +394,274 @@ export async function POST(req: NextRequest) {
         console.log("SES: sending user email", { to: userEmail, subject });
 
         const userHtml = `
-          <div style="font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;color:#111">
-            <h2 style="font-size:18px;font-weight:600">Hi ${friendlyName},</h2>
-            <p>Thank you for shopping with <strong>Made in Korea</strong>. Your order has been placed successfully.</p>
-            <p>
-              <strong>Order number:</strong> ${orderNumber}<br/>
-              <strong>Total:</strong> ${totalFormatted}<br/>
-              <strong>Payment method:</strong> Razorpay
+          <div
+            style="
+              font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+                sans-serif;
+              font-size: 14px;
+              color: #111827;
+              background-color: #f9fafb;
+              padding: 24px;
+            "
+          >
+            <div
+              style="
+                max-width: 640px;
+                margin: 0 auto;
+                background: #ffffff;
+                border-radius: 10px;
+                border: 1px solid #e5e7eb;
+                padding: 24px 24px 20px;
+              "
+            >
+              <div style="text-align: center; margin-bottom: 24px">
+                <div
+                  style="
+                    display: inline-block;
+                    padding: 8px 14px;
+                    border-radius: 999px;
+                    background: #f9731610;
+                    color: #ea580c;
+                    font-size: 11px;
+                    font-weight: 600;
+                    text-transform: uppercase;
+                    letter-spacing: 0.08em;
+                  "
+                >
+                  Order Confirmed
+                </div>
+                <h2
+                  style="
+                    font-size: 20px;
+                    font-weight: 600;
+                    margin-top: 12px;
+                    margin-bottom: 4px;
+                  "
+                >
+                  Hi ${friendlyName}, your order is on its way!
+                </h2>
+                <p style="margin: 0; color: #4b5563; font-size: 13px">
+                  Thank you for shopping with
+                  <strong>Made in Korea</strong>. We’ve received your payment and your
+                  order is now being processed.
+                </p>
+              </div>
+
+              <div
+                style="
+                  background: #f9fafb;
+                  border-radius: 10px;
+                  padding: 16px 18px;
+                  margin-bottom: 20px;
+                "
+              >
+                <h3
+                  style="
+                    margin: 0 0 8px;
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: #111827;
+                  "
+                >
+                  Order summary
+                </h3>
+                <table style="width: 100%; border-collapse: collapse; font-size: 13px">
+                  <tbody>
+                    <tr>
+                      <td style="padding: 4px 0; color: #6b7280">Order number</td>
+                      <td style="padding: 4px 0; text-align: right; font-weight: 500">
+                        ${orderNumber}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 4px 0; color: #6b7280">Subtotal</td>
+                      <td style="padding: 4px 0; text-align: right;">
+                        ${currency} ${base.toFixed(2)}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 4px 0; color: #6b7280">Discount</td>
+                      <td style="padding: 4px 0; text-align: right;">
+                        - ${currency} ${discountAmount.toFixed(2)} (${discountPct.toFixed(
+          2
+        )}%)
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 4px 0; color: #6b7280">Shipping</td>
+                      <td style="padding: 4px 0; text-align: right;">
+                        ${currency} ${shippingFee.toFixed(2)}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 4px 0; color: #6b7280">Total paid</td>
+                      <td
+                        style="
+                          padding: 4px 0;
+                          text-align: right;
+                          font-weight: 600;
+                          color: #111827;
+                        "
+                      >
+                        ${totalFormatted}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 4px 0; color: #6b7280">Payment method</td>
+                      <td style="padding: 4px 0; text-align: right">Razorpay</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div style="margin-bottom: 20px">
+                <h3
+                  style="
+                    margin: 0 0 6px;
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: #111827;
+                  "
+                >
+                  Track your order & download invoice
+                </h3>
+                <p style="margin: 0 0 10px; color: #4b5563; font-size: 13px">
+                  You can view your complete order details, download invoice copies,
+                  and check your transaction history anytime from your account.
+                </p>
+                <a
+                  href="${accountOrdersUrl}"
+                  style="
+                    display: inline-block;
+                    padding: 8px 14px;
+                    border-radius: 999px;
+                    background: #111827;
+                    color: #f9fafb;
+                    font-size: 12px;
+                    font-weight: 500;
+                    text-decoration: none;
+                  "
+                >
+                  View my orders & invoices
+                </a>
+              </div>
+
+              <div
+                style="
+                  margin-bottom: 20px;
+                  padding: 14px 16px;
+                  border-radius: 10px;
+                  background: #fef3c7;
+                  border: 1px solid #facc15;
+                "
+              >
+                <h3
+                  style="
+                    margin: 0 0 6px;
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: #92400e;
+                  "
+                >
+                  Need help with your order?
+                </h3>
+                <p style="margin: 0 0 4px; color: #92400e; font-size: 13px">
+                  For any support, product queries, or shipment updates, you can reach
+                  us at:
+                </p>
+                <p style="margin: 0; color: #92400e; font-size: 13px">
+                  <strong>Phone:</strong>
+                  <a href="${supportPhoneHref}" style="color: inherit; text-decoration: none"
+                    >${supportPhoneDisplay}</a
+                  ><br />
+                  <strong>Email:</strong>
+                  <a
+                    href="mailto:${supportEmail}"
+                    style="color: inherit; text-decoration: none"
+                    >${supportEmail}</a
+                  >
+                </p>
+              </div>
+
+              <div style="margin-bottom: 16px">
+                <h3
+                  style="
+                    margin: 0 0 6px;
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: #111827;
+                  "
+                >
+                  A quick note about your products
+                </h3>
+                <p style="margin: 0 0 6px; color: #4b5563; font-size: 13px">
+                  All our products are curated from trusted Korean brands. For the best
+                  experience:
+                </p>
+                <ul style="margin: 0 0 6px 18px; padding: 0; color: #4b5563; font-size: 13px">
+                  <li>Follow the usage instructions on the product packaging.</li>
+                  <li>Store in a cool, dry place away from direct sunlight.</li>
+                  <li>Do a patch test before first use if you have sensitive skin.</li>
+                </ul>
+                <p style="margin: 0; color: #4b5563; font-size: 13px">
+                  You’ll see the exact products and quantities for this order inside your
+                  account under <strong>“Orders”</strong>.
+                </p>
+              </div>
+
+              <p
+                style="
+                  margin-top: 20px;
+                  margin-bottom: 4px;
+                  color: #4b5563;
+                  font-size: 13px;
+                "
+              >
+                Thank you again for choosing
+                <strong>Made in Korea</strong>. We’re excited for you to receive your
+                order!
+              </p>
+              <p style="margin: 0; color: #4b5563; font-size: 13px">
+                Love,<br />
+                <strong>Team Made in Korea</strong>
+              </p>
+            </div>
+
+            <p
+              style="
+                margin: 16px auto 0;
+                max-width: 640px;
+                text-align: center;
+                color: #9ca3af;
+                font-size: 11px;
+              "
+            >
+              You’re receiving this email because you placed an order on
+              <strong>madenkorea.com</strong>.
             </p>
-            <p>We’ll send you another email when your order ships.</p>
-            <p style="margin-top:24px">Love,<br/>Team Made in Korea</p>
           </div>
         `;
 
         const userText = [
           `Hi ${friendlyName},`,
           "",
-          "Thank you for shopping with Made in Korea. Your order has been placed successfully.",
+          "Thank you for shopping with Made in Korea. Your order has been placed successfully and is now being processed.",
           "",
           `Order number: ${orderNumber}`,
-          `Total: ${totalFormatted}`,
+          `Subtotal: ${currency} ${base.toFixed(2)}`,
+          `Discount: ${currency} ${discountAmount.toFixed(2)} (${discountPct.toFixed(
+            2
+          )}%)`,
+          `Shipping: ${currency} ${shippingFee.toFixed(2)}`,
+          `Total paid: ${totalFormatted}`,
           "Payment method: Razorpay",
           "",
-          "We’ll send you another email when your order ships.",
+          "You can view your full order, download invoice copies, and see your transaction history here:",
+          `Account orders: ${accountOrdersUrl}`,
+          "",
+          "For any support, product questions, or shipment updates, contact us at:",
+          `Phone: ${supportPhoneDisplay}`,
+          `Email: ${supportEmail}`,
           "",
           "Love,",
           "Team Made in Korea",
@@ -446,23 +692,194 @@ export async function POST(req: NextRequest) {
 
       // === Admin notification email ===
       const adminSubject = `New order placed: ${orderNumber}`;
+      const hasPromo = !!promoCodeId;
+      const hasInfluencer = !!influencerId;
+
       const adminHtml = `
-        <div style="font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;color:#111">
-          <h2 style="font-size:18px;font-weight:600">New order placed</h2>
-          <p><strong>Order number:</strong> ${orderNumber}</p>
-          <p><strong>Total:</strong> ${totalFormatted}</p>
-          <p><strong>User ID:</strong> ${order.user_id || "guest"}</p>
-          <p><strong>User email:</strong> ${userEmail || "—"}</p>
-          <p><strong>Payment provider:</strong> Razorpay</p>
+        <div
+          style="
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+              sans-serif;
+            font-size: 14px;
+            color: #111827;
+            background-color: #f9fafb;
+            padding: 24px;
+          "
+        >
+          <div
+            style="
+              max-width: 640px;
+              margin: 0 auto;
+              background: #ffffff;
+              border-radius: 10px;
+              border: 1px solid #e5e7eb;
+              padding: 24px 24px 20px;
+            "
+          >
+            <h2
+              style="
+                font-size: 18px;
+                font-weight: 600;
+                margin: 0 0 12px;
+              "
+            >
+              New order placed
+            </h2>
+
+            <div
+              style="
+                background: #f9fafb;
+                border-radius: 10px;
+                padding: 14px 16px;
+                margin-bottom: 16px;
+              "
+            >
+              <h3
+                style="
+                  margin: 0 0 8px;
+                  font-size: 13px;
+                  font-weight: 600;
+                  color: #111827;
+                "
+              >
+                Order details
+              </h3>
+              <table style="width: 100%; border-collapse: collapse; font-size: 13px">
+                <tbody>
+                  <tr>
+                    <td style="padding: 4px 0; color: #6b7280">Order number</td>
+                    <td style="padding: 4px 0; text-align: right; font-weight: 500">
+                      ${orderNumber}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 4px 0; color: #6b7280">Subtotal</td>
+                    <td style="padding: 4px 0; text-align: right;">
+                      ${currency} ${base.toFixed(2)}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 4px 0; color: #6b7280">Discount</td>
+                    <td style="padding: 4px 0; text-align: right;">
+                      - ${currency} ${discountAmount.toFixed(2)} (${discountPct.toFixed(
+        2
+      )}%)
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 4px 0; color: #6b7280">Shipping</td>
+                    <td style="padding: 4px 0; text-align: right;">
+                      ${currency} ${shippingFee.toFixed(2)}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 4px 0; color: #6b7280">Total paid</td>
+                    <td
+                      style="
+                        padding: 4px 0;
+                        text-align: right;
+                        font-weight: 600;
+                        color: #111827;
+                      "
+                    >
+                      ${currency} ${paidAmount.toFixed(2)}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 4px 0; color: #6b7280">Payment provider</td>
+                    <td style="padding: 4px 0; text-align: right;">Razorpay</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div
+              style="
+                background: #eef2ff;
+                border-radius: 10px;
+                padding: 14px 16px;
+                margin-bottom: 16px;
+              "
+            >
+              <h3
+                style="
+                  margin: 0 0 8px;
+                  font-size: 13px;
+                  font-weight: 600;
+                  color: #1d4ed8;
+                "
+              >
+                Customer details
+              </h3>
+              <p style="margin: 0 0 4px; color: #1f2937; font-size: 13px">
+                <strong>User ID:</strong> ${order.user_id || "guest"}
+              </p>
+              <p style="margin: 0 0 4px; color: #1f2937; font-size: 13px">
+                <strong>User email:</strong> ${userEmail || "—"}
+              </p>
+            </div>
+
+            <div
+              style="
+                background: #ecfdf5;
+                border-radius: 10px;
+                padding: 14px 16px;
+                margin-bottom: 16px;
+              "
+            >
+              <h3
+                style="
+                  margin: 0 0 8px;
+                  font-size: 13px;
+                  font-weight: 600;
+                  color: #047857;
+                "
+              >
+                Promotion & attribution
+              </h3>
+              <p style="margin: 0 0 4px; color: #064e3b; font-size: 13px">
+                <strong>Promo code ID:</strong> ${promoCodeId || "—"}
+              </p>
+              <p style="margin: 0 0 4px; color: #064e3b; font-size: 13px">
+                <strong>Influencer ID:</strong> ${influencerId || "—"}
+              </p>
+              <p style="margin: 0 0 4px; color: #064e3b; font-size: 13px">
+                <strong>Discount % (attribution):</strong> ${discountPct.toFixed(2)}%
+              </p>
+              <p style="margin: 0 0 4px; color: #064e3b; font-size: 13px">
+                <strong>Commission %:</strong> ${commissionPct.toFixed(2)}%
+              </p>
+              <p style="margin: 0; color: #064e3b; font-size: 13px">
+                <strong>Commission amount:</strong> ${currency} ${commissionAmount.toFixed(
+        2
+      )}
+              </p>
+            </div>
+
+            <p style="margin: 0; color: #6b7280; font-size: 12px">
+              For full product line items and shipping details, refer to the admin
+              dashboard or Supabase orders table.
+            </p>
+          </div>
         </div>
       `;
+
       const adminText = [
         "New order placed:",
         `Order number: ${orderNumber}`,
-        `Total: ${totalFormatted}`,
+        `Subtotal: ${currency} ${base.toFixed(2)}`,
+        `Discount: ${currency} ${discountAmount.toFixed(2)} (${discountPct.toFixed(
+          2
+        )}%)`,
+        `Shipping: ${currency} ${shippingFee.toFixed(2)}`,
+        `Total paid: ${currency} ${paidAmount.toFixed(2)}`,
         `User ID: ${order.user_id || "guest"}`,
         `User email: ${userEmail || "—"}`,
-        "Payment provider: Razorpay",
+        `Payment provider: Razorpay`,
+        `Promo code ID: ${promoCodeId || "—"}`,
+        `Influencer ID: ${influencerId || "—"}`,
+        `Commission %: ${commissionPct.toFixed(2)}%`,
+        `Commission amount: ${currency} ${commissionAmount.toFixed(2)}`,
       ].join("\n");
 
       console.log("SES: sending admin email", {
