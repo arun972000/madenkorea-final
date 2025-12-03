@@ -25,11 +25,11 @@ const SITE_URL = "https://madenkorea.com";
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: "MadenKorea — Consumer Innovations",
+    default: "MadenKorea - Consumer Innovations",
     template: "%s | MadenKorea",
   },
   description:
-    "Discover trending Korean beauty, skincare, personal care, and lifestyle products. Authentic K-beauty brands, curated drops, and the latest consumer innovations from Korea.",
+    "Discover trending Korean skincare, personal care, and lifestyle products. K-beauty brands, curated drops, and the latest consumer innovations from Korea.",
   keywords: [
     // Brand & high-level
     "MadenKorea",
@@ -125,9 +125,9 @@ export const metadata: Metadata = {
     type: "website",
     url: SITE_URL,
     siteName: "MadenKorea",
-    title: "MadenKorea — Consumer Innovations",
+    title: "MadenKorea - Consumer Innovations",
     description:
-      "Shop authentic Korean beauty, personal care, and lifestyle products curated for you.",
+      "Shop Korean beauty, personal care, and lifestyle products curated for you.",
     images: [
       {
         url: "/logo md.png",
@@ -139,7 +139,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "MadenKorea — Korean Beauty & Consumer Innovations",
+    title: "MadenKorea - Korean Beauty & Consumer Innovations",
     description:
       "Shop authentic Korean beauty, personal care, and lifestyle products curated for you.",
     images: ["/logo md.png"],
