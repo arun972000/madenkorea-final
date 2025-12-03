@@ -231,9 +231,9 @@ export default function PartnerProgramPage() {
           <div className="mx-auto max-w-6xl px-4 py-14 sm:py-16">
             <div className="rounded-3xl border border-white/60 bg-white/70 p-6 shadow-2xl backdrop-blur">
               <div className="flex items-start gap-4">
-                <div className="rounded-2xl bg-white/70 p-2 text-rose-700">
+                {/* <div className="rounded-2xl bg-white/70 p-2 text-rose-700">
                   <Sparkles className="h-6 w-6" />
-                </div>
+                </div> */}
                 <div className="flex-1">
                   <p className="inline-flex items-center gap-2 rounded-full bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700">
                     Made in Korea • Global codes • Consumer innovations
@@ -478,7 +478,7 @@ export default function PartnerProgramPage() {
               </p>
 
               <label className="mb-1 block text-xs font-medium">
-                Public handle (optional)
+                Name
               </label>
               <input
                 className="mb-3 w-full rounded-lg border px-3 py-2 text-sm"
@@ -541,7 +541,7 @@ export default function PartnerProgramPage() {
                 >
                   <div>
                     <label className="mb-1 block text-xs font-medium">
-                      Public handle (optional)
+                      Name
                     </label>
                     <input
                       className="w-full rounded-lg border px-3 py-2 text-sm"

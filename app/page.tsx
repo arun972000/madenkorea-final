@@ -18,57 +18,152 @@ import {
 import { createClient } from "@supabase/supabase-js";
 import HomeVideoCarouselSection from "@/components/home/HomeVideoCarouselSection";
 import CertificationSwiper from "@/components/Cetifications";
-import type { Metadata } from 'next';
+import type { Metadata } from "next";
+
+const SITE_URL = "https://madenkorea.com";
 
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: {
-    default: 'MadenKorea — Consumer Innovations',
-    template: '%s | MadenKorea',
+    default: "MadenKorea — Consumer Innovations",
+    template: "%s | MadenKorea",
   },
   description:
-    'Discover trending products from Korea across beauty, personal care, and lifestyle. Authentic brands, curated drops, and the latest consumer innovations.',
+    "Discover trending Korean beauty, skincare, personal care, and lifestyle products. Authentic K-beauty brands, curated drops, and the latest consumer innovations from Korea.",
   keywords: [
-    'MadenKorea',
-    'Korean beauty',
-    'K-beauty',
-    'skincare',
-    'personal care',
-    'Korean brands',
-    'consumer innovations',
-    'Korea shopping',
+    // Brand & high-level
+    "MadenKorea",
+    "K-beauty",
+    "Korean beauty",
+    "skincare",
+    "skin care",
+    "cosmetics",
+    "makeup",
+    "haircare",
+    "personal care",
+    "lifestyle products",
+    "beauty products",
+    "online beauty store",
+    "buy skincare online",
+    "buy beauty products online",
+
+    // Generic product types (no Korea prefix)
+    "sunscreen",
+    "sun cream",
+    "SPF 50",
+    "SPF 30",
+    "face serum",
+    "serum",
+    "vitamin C serum",
+    "hyaluronic acid serum",
+    "moisturizer",
+    "face cream",
+    "day cream",
+    "night cream",
+    "gel cream",
+    "cleanser",
+    "face wash",
+    "foam cleanser",
+    "gel cleanser",
+    "oil cleanser",
+    "toner",
+    "essence",
+    "ampoule",
+    "eye cream",
+    "eye serum",
+    "sheet mask",
+    "clay mask",
+    "wash off mask",
+    "lip balm",
+    "lip mask",
+    "lip tint",
+
+    // Skin concerns / routines
+    "acne care",
+    "pore care",
+    "anti-aging",
+    "anti wrinkle",
+    "brightening",
+    "whitening",
+    "dark spot care",
+    "hydrating",
+    "glowing skin",
+    "glass skin",
+    "sensitive skin",
+    "dry skin",
+    "oily skin",
+    "combination skin",
+    "skin barrier repair",
+    "skin care routine",
+    "10 step skincare routine",
+
+    // Korea-specific + India targeting
+    "Korean skincare",
+    "Korean skin care",
+    "Korean cosmetics",
+    "Korean makeup",
+    "Korean haircare",
+    "Korean personal care",
+    "Korean lifestyle products",
+    "Korean beauty India",
+    "Korean beauty products India",
+    "buy Korean skincare online",
+    "K-beauty online store",
+    "authentic Korean brands",
+    "Korean face serum",
+    "Korean sunscreen",
+    "Korean moisturizer",
+    "Korean toner",
+    "Korean sheet mask",
+    "consumer innovations",
+    "Korea shopping",
   ],
   alternates: {
-    canonical: 'https://madenkorea.com/',
+    canonical: SITE_URL,
   },
   openGraph: {
-    type: 'website',
-    url: 'https://madenkorea.com/',
-    siteName: 'MadenKorea',
-    title: 'MadenKorea — Consumer Innovations',
+    type: "website",
+    url: SITE_URL,
+    siteName: "MadenKorea",
+    title: "MadenKorea — Consumer Innovations",
     description:
-      'Shop authentic Korean beauty, personal care, and lifestyle products curated for you.',
+      "Shop authentic Korean beauty, personal care, and lifestyle products curated for you.",
     images: [
-      // Replace with your actual OG image (1200×630). Keep absolute URLs.
-      { url: '/logo md.png', width: 1200, height: 630, alt: 'MadenKorea homepage' },
+      {
+        url: "/logo md.png",
+        width: 1200,
+        height: 630,
+        alt: "MadenKorea homepage",
+      },
     ],
   },
   twitter: {
-    card: 'summary_large_image',
-    title: 'MadenKorea — Korean Beauty & Consumer Innovations',
+    card: "summary_large_image",
+    title: "MadenKorea — Korean Beauty & Consumer Innovations",
     description:
-      'Shop authentic Korean beauty, personal care, and lifestyle products curated for you.',
-    images: ['/logo md.png'],
+      "Shop authentic Korean beauty, personal care, and lifestyle products curated for you.",
+    images: ["/logo md.png"],
   },
   icons: {
-    icon: '/favicon.ico',
- 
+    icon: "/favicon.ico",
   },
-  robots: { index: true, follow: true },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-snippet": -1,
+      "max-image-preview": "large",
+      "max-video-preview": -1,
+    },
+  },
+  applicationName: "MadenKorea",
+  category: "ecommerce",
   other: {
-    'format-detection': 'telephone=no, address=no, email=no',
+    "format-detection": "telephone=no, address=no, email=no",
   },
 };
-
 
 export const revalidate = 300; // ISR: refresh the home data every 5 minutes
 
@@ -104,6 +199,7 @@ type CardProduct = {
   net_weight_g?: number | null;
   country_of_origin?: string | null;
   hero_image_path?: string | null;
+  hero_image_url?: string | null; // added for SEO / schema image
   brands?: { name?: string | null } | null;
 };
 
@@ -129,13 +225,11 @@ async function fetchEditorial(
     .eq("is_published", true);
 
   if (kind === "featured") {
-    // If you added featured_rank, this will naturally order featured products.
     query = query
       .eq("is_featured", true)
       .order("featured_rank", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: false });
   } else {
-    // Trending: order by purchases_count if you added it; fallback by created_at
     query = query
       .eq("is_trending", true)
       .order("purchases_count", { ascending: false, nullsFirst: true })
@@ -148,7 +242,6 @@ async function fetchEditorial(
     return [];
   }
 
-  // Add server-computed public URL (faster than letting the card compute client-side)
   return (data ?? []).map((p) => ({
     ...p,
     hero_image_url: storagePublicUrl(p.hero_image_path) ?? undefined,
@@ -156,9 +249,7 @@ async function fetchEditorial(
 }
 
 export default async function Home() {
-  // Keep your existing mock-driven sections (banners, videos, etc.)
   const banners = await getBanners("home");
-
   const brands = await getBrandsForCarousel("site-assets");
 
   const homebanners = mockBanners.filter(
@@ -181,56 +272,145 @@ export default async function Home() {
     fetchEditorial("featured", 8),
   ]);
 
+  // --- JSON-LD (Google schema) for home + featured products ---
+
+  const homeJsonLd = {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": `${SITE_URL}#website`,
+        url: SITE_URL,
+        name: "MadenKorea",
+        description:
+          "MadenKorea is a curated marketplace for Korean beauty, skincare, personal care, and lifestyle products.",
+        inLanguage: "en-IN",
+        potentialAction: {
+          "@type": "SearchAction",
+          target: `${SITE_URL}/search?q={search_term_string}`,
+          "query-input": "required name=search_term_string",
+        },
+      },
+      {
+        "@type": "Organization",
+        "@id": `${SITE_URL}#organization`,
+        name: "MadenKorea",
+        url: SITE_URL,
+        logo: {
+          "@type": "ImageObject",
+          url: `${SITE_URL}/logo md.png`,
+        },
+      },
+    ],
+  };
+
+  const productGraph =
+    featuredProducts.length > 0
+      ? featuredProducts.map((p) => {
+          const price = p.sale_price ?? p.price ?? null;
+          const currency = p.currency ?? "INR";
+
+          return {
+            "@type": "Product",
+            "@id": `${SITE_URL}/products/${p.slug}#product`,
+            name: p.name,
+            image: p.hero_image_url
+              ? [p.hero_image_url.startsWith("http")
+                  ? p.hero_image_url
+                  : `${SITE_URL}${p.hero_image_url}`]
+              : undefined,
+            description: p.short_description ?? undefined,
+            brand: p.brands?.name
+              ? { "@type": "Brand", name: p.brands.name }
+              : undefined,
+            sku: p.id,
+            url: `${SITE_URL}/products/${p.slug}`,
+            offers:
+              price !== null
+                ? {
+                    "@type": "Offer",
+                    priceCurrency: currency,
+                    price: price.toString(),
+                    availability: "https://schema.org/InStock",
+                    url: `${SITE_URL}/products/${p.slug}`,
+                  }
+                : undefined,
+          };
+        })
+      : [];
+
+  const productJsonLd =
+    productGraph.length > 0
+      ? {
+          "@context": "https://schema.org",
+          "@graph": productGraph,
+        }
+      : null;
+
   return (
-    <CustomerLayout>
-      <HeroBanner banners={banners} />
+    <>
+      {/* SEO: main page & organization schema */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(homeJsonLd) }}
+      />
+      {/* SEO: featured product schema for Google rich results */}
+      {productJsonLd && (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(productJsonLd) }}
+        />
+      )}
 
-      <div className="container mx-auto py-12 space-y-16">
-        {/* Trending from Supabase */}
-        {trendingProducts.length > 0 && (
-          <EditorialSection
-            title="Trending Now"
-            description="The hottest Consumer Innovations products everyone's talking about"
-            products={trendingProducts}
-          />
-        )}
+      <CustomerLayout>
+        <HeroBanner banners={banners} />
 
-        {/* (Optional) Keep existing Best Sellers from mocks until you wire it up */}
-        {/* {bestsellerProducts.length > 0 && (
-          <EditorialSection
-            title="Best Sellers"
-            description="Customer favorites and top-rated products"
-            products={bestsellerProducts.slice(0, 8) as any}
-          />
-        )} */}
+        <div className="container mx-auto py-12 space-y-16">
+          {/* Trending from Supabase */}
+          {trendingProducts.length > 0 && (
+            <EditorialSection
+              title="Trending Now"
+              description="The hottest Korean beauty and consumer innovations everyone’s talking about."
+              products={trendingProducts}
+            />
+          )}
 
-        <HomeVideoCarouselSection pageScope="home" limit={8} />
+          {/* Keep existing Best Sellers (mock) if needed */}
+          {/* {bestsellerProducts.length > 0 && (
+            <EditorialSection
+              title="Best Sellers"
+              description="Customer favorites and top-rated products"
+              products={bestsellerProducts.slice(0, 8) as any}
+            />
+          )} */}
 
-        <BrandCarousel brands={brands} />
+          <HomeVideoCarouselSection pageScope="home" limit={8} />
 
-        {/* (Optional) Keep New Arrivals from mocks until you wire it up */}
-        {/* {newArrivalProducts.length > 0 && (
-          <EditorialSection
-            title="New Arrivals"
-            description="Fresh from Korea: Latest beauty innovations"
-            products={newArrivalProducts.slice(0, 8) as any}
-          />
-        )} */}
+          <BrandCarousel brands={brands} />
 
-        {/* Featured from Supabase */}
-        {featuredProducts.length > 0 && (
-          <EditorialSection
-            title="Featured Products"
-            description=""
-            products={featuredProducts}
-          />
-        )}
+          {/* {newArrivalProducts.length > 0 && (
+            <EditorialSection
+              title="New Arrivals"
+              description="Fresh from Korea: Latest beauty innovations"
+              products={newArrivalProducts.slice(0, 8) as any}
+            />
+          )} */}
 
-        {influencerVideos.length > 0 && (
-          <InstagramVideoCarousel videos={influencerVideos} />
-        )}
-        <CertificationSwiper />
-      </div>
-    </CustomerLayout>
+          {/* Featured from Supabase */}
+          {featuredProducts.length > 0 && (
+            <EditorialSection
+              title="Featured Products"
+              description="Handpicked Korean skincare and lifestyle bestsellers, curated by MadenKorea."
+              products={featuredProducts}
+            />
+          )}
+
+          {influencerVideos.length > 0 && (
+            <InstagramVideoCarousel videos={influencerVideos} />
+          )}
+          <CertificationSwiper />
+        </div>
+      </CustomerLayout>
+    </>
   );
 }
