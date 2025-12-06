@@ -1,284 +1,215 @@
-// app/admin/marketing/facebook/components/CampaignList.jsx
+// app/(admin)/social/facebook/CampaignList.jsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import {supabase} from "@/lib/supabaseClient";
+import React, { useEffect, useState } from "react";
 import {
+  Facebook,
+  Image as ImageIcon,
+  Wand2,
+  Send,
   Loader2,
-  Plus,
-  RefreshCw,
   MessageCircle,
-  Pencil,
-  Trash2,
+  ThumbsUp,
   Eye,
+  Trash2,
+  Edit,
+  X,
+  ChevronDown,
 } from "lucide-react";
 
-const POSTS_PAGE_SIZE = 5;
-
-// Helper to extract primary media from post.attachments
-function getPrimaryAttachment(post) {
-  const att = post.attachments;
-  const first = att?.data?.[0];
-  if (!first) return null;
-
-  const mediaType = first.media_type || null;
-  const imageSrc =
-    first.media?.image?.src || first.media?.source || null;
-  const url = first.url || imageSrc || null;
-
-  return {
-    mediaType,
-    imageSrc,
-    url,
-  };
+function cn(...classes) {
+  return classes.filter(Boolean).join(" ");
 }
 
 export default function CampaignList() {
-  // Posts + loading
-  const [loading, setLoading] = useState(false);
   const [posts, setPosts] = useState([]);
-  const [error, setError] = useState(null);
+  const [loadingPosts, setLoadingPosts] = useState(false);
+  const [error, setError] = useState("");
 
-  // Filters / pagination
-  const [search, setSearch] = useState("");
-  const [visibleCount, setVisibleCount] = useState(POSTS_PAGE_SIZE);
-
-  // New post
-  const [showForm, setShowForm] = useState(false);
+  // create composer
+  const [showCreate, setShowCreate] = useState(false);
   const [message, setMessage] = useState("");
-  const [posting, setPosting] = useState(false);
-  const [postError, setPostError] = useState(null);
+  const [tags, setTags] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
 
-  // media via URL or file
-  const [mediaUrl, setMediaUrl] = useState("");
-  const [mediaUrlTouched, setMediaUrlTouched] = useState(false);
   const [mediaFile, setMediaFile] = useState(null);
-  const [mediaPreview, setMediaPreview] = useState(null);
-  const [uploadingMedia, setUploadingMedia] = useState(false);
+  const [mediaPreview, setMediaPreview] = useState("");
+  const [mediaType, setMediaType] = useState("IMAGE"); // IMAGE | VIDEO
+  const [creating, setCreating] = useState(false);
 
-  // Edit post
-  const [editingPost, setEditingPost] = useState(null);
+  // edit
+  const [editingId, setEditingId] = useState(null);
   const [editMessage, setEditMessage] = useState("");
-  const [editing, setEditing] = useState(false);
-  const [editError, setEditError] = useState(null);
+  const [editLoading, setEditLoading] = useState(false);
 
-  // Comments & replies
-  const [selectedPost, setSelectedPost] = useState(null);
+  // comments drawer
+  const [activePostForComments, setActivePostForComments] = useState(null);
   const [comments, setComments] = useState([]);
-  const [commentsLoading, setCommentsLoading] = useState(false);
-  const [commentsError, setCommentsError] = useState(null);
-
-  const [replyMessage, setReplyMessage] = useState("");
-  const [replying, setReplying] = useState(false);
-  const [replyError, setReplyError] = useState(null);
-
-  // Comment moderation
-  const [commentBusyId, setCommentBusyId] = useState(null);
-  const [commentActionError, setCommentActionError] = useState(null);
-
-  // -------- Load posts --------
-  const loadPosts = async () => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      const res = await fetch("/api/facebook/page-posts");
-      const json = await res.json();
-
-      if (!res.ok) {
-        setError(json.error || "Failed to load Facebook posts");
-        setPosts([]);
-      } else {
-        setPosts(json.data || []);
-      }
-    } catch (err) {
-      console.error(err);
-      setError("Network error while loading posts");
-      setPosts([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [loadingComments, setLoadingComments] = useState(false);
+  const [commentError, setCommentError] = useState("");
+  const [newComment, setNewComment] = useState("");
+  const [commentLoading, setCommentLoading] = useState(false);
 
   useEffect(() => {
-    loadPosts();
+    fetchPosts();
   }, []);
 
-  // Reset visible count when search changes
-  useEffect(() => {
-    setVisibleCount(POSTS_PAGE_SIZE);
-  }, [search]);
+  async function fetchPosts() {
+    try {
+      setLoadingPosts(true);
+      setError("");
+      const res = await fetch("/api/facebook/page-posts");
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.error || "Failed to load posts");
+      }
+      setPosts(json.data || []);
+    } catch (err) {
+      console.error(err);
+      setError(String(err.message || err));
+    } finally {
+      setLoadingPosts(false);
+    }
+  }
 
-  // Filter + slice posts
-  const filteredPosts = useMemo(() => {
-    const s = search.trim().toLowerCase();
-    if (!s) return posts;
-    return posts.filter((p) =>
-      (p.message || "").toLowerCase().includes(s)
-    );
-  }, [posts, search]);
+  function resetCreateForm() {
+    setMessage("");
+    setTags("");
+    setMediaFile(null);
+    setMediaPreview("");
+    setMediaType("IMAGE");
+  }
 
-  const visiblePosts = filteredPosts.slice(0, visibleCount);
-  const hasMore = filteredPosts.length > visibleCount;
+  async function uploadMediaIfAny() {
+    if (!mediaFile) return null;
+    const formData = new FormData();
+    formData.append("file", mediaFile);
+    formData.append("folder", "facebook"); // uses facebook-media bucket
+    const res = await fetch("/api/uploads/social", {
+      method: "POST",
+      body: formData,
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      throw new Error(json.error || "Upload failed");
+    }
+    return json.publicUrl;
+  }
 
-  // -------- New post: file handler --------
-  const handleMediaFileChange = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) {
-      setMediaFile(null);
-      setMediaPreview(null);
+  async function handleCreatePost(e) {
+    e.preventDefault();
+
+    if (!message.trim() && !mediaFile) {
+      alert("Write something or attach a media file before posting.");
       return;
     }
-
-    setMediaFile(file);
-    setMediaPreview(URL.createObjectURL(file));
-    setMediaUrl("");
-    setMediaUrlTouched(false);
-  };
-
-  // -------- New post: create --------
-  const handleCreatePost = async () => {
-    const trimmedMessage = message.trim();
-    let finalMediaUrl = mediaUrl.trim() || null;
-
-    if (!trimmedMessage && !finalMediaUrl && !mediaFile) {
-      setPostError("Provide at least a message or an image file/URL");
-      return;
-    }
-
-    setPosting(true);
-    setPostError(null);
 
     try {
-      // 1️⃣ If file chosen, upload to Supabase Storage
-      if (mediaFile) {
-        setUploadingMedia(true);
+      setCreating(true);
+      setError("");
 
-        const fileExt = mediaFile.name.split(".").pop();
-        const fileName = `${Date.now()}-${Math.random()
-          .toString(36)
-          .slice(2)}.${fileExt}`;
-        const filePath = `facebook/${fileName}`;
+      const fullMessage = tags ? `${message}\n\n${tags}` : message;
+      const mediaUrl = await uploadMediaIfAny();
 
-        const { error: uploadError } = await supabase.storage
-          .from("facebook-media")
-          .upload(filePath, mediaFile, {
-            cacheControl: "3600",
-            upsert: false,
-          });
-
-        if (uploadError) {
-          console.error("Supabase upload error", uploadError);
-          setPostError("Failed to upload image. Please try again.");
-          setUploadingMedia(false);
-          setPosting(false);
-          return;
-        }
-
-        const {
-          data: { publicUrl },
-        } = supabase.storage.from("facebook-media").getPublicUrl(filePath);
-
-        finalMediaUrl = publicUrl;
-        setUploadingMedia(false);
-      }
-
-      // 2️⃣ Call API to create Facebook post
       const res = await fetch("/api/facebook/page-posts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          message: trimmedMessage || null,
-          media_url: finalMediaUrl || null,
+          message: fullMessage,
+          media_url: mediaUrl,
         }),
       });
-
       const json = await res.json();
-
       if (!res.ok) {
-        setPostError(json.error || "Failed to create post");
-      } else {
-        await loadPosts();
-        // reset form
-        setMessage("");
-        setMediaUrl("");
-        setMediaUrlTouched(false);
-        setMediaFile(null);
-        setMediaPreview(null);
-        setShowForm(false);
+        throw new Error(json.error || "Failed to create post");
       }
+
+      resetCreateForm();
+      setShowCreate(false);
+      fetchPosts();
     } catch (err) {
       console.error(err);
-      setPostError("Network error while creating post");
+      setError(String(err.message || err));
     } finally {
-      setPosting(false);
-      setUploadingMedia(false);
+      setCreating(false);
     }
-  };
+  }
 
-  // -------- Edit post handlers --------
-  const startEdit = (p) => {
-    setEditingPost(p);
-    setEditMessage(p.message || "");
-    setEditError(null);
-  };
-
-  const cancelEdit = () => {
-    setEditingPost(null);
-    setEditMessage("");
-    setEditError(null);
-  };
-
-  const handleSaveEdit = async () => {
-    const trimmed = editMessage.trim();
-    if (!trimmed) {
-      setEditError("Message cannot be empty");
+  // ✅ use SAME AI endpoint as Instagram
+  async function handleGenerateCopy() {
+    const baseText = message.trim();
+    if (!baseText) {
+      alert("Base caption / text is required");
       return;
     }
-    if (!editingPost) return;
-
-    setEditing(true);
-    setEditError(null);
 
     try {
+      setAiLoading(true);
+      const res = await fetch("/api/ai/social-copy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          platform: "facebook",
+          baseText,
+          wantHashtags: true,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "AI error");
+
+      if (json.optimizedText) setMessage(json.optimizedText);
+      if (json.hashtags) setTags(json.hashtags);
+    } catch (err) {
+      console.error(err);
+      alert("AI generation failed: " + (err.message || err));
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
+  function onFileChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setMediaFile(file);
+    setMediaPreview(URL.createObjectURL(file));
+    setMediaType(file.type.startsWith("video") ? "VIDEO" : "IMAGE");
+  }
+
+  // edit post
+  function openEdit(post) {
+    setEditingId(post.fb_post_id);
+    setEditMessage(post.message || "");
+  }
+
+  async function saveEdit() {
+    if (!editingId || !editMessage.trim()) return;
+    try {
+      setEditLoading(true);
       const res = await fetch("/api/facebook/page-posts", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          fb_post_id: editingPost.fb_post_id,
-          message: trimmed,
+          fb_post_id: editingId,
+          message: editMessage,
         }),
       });
-
       const json = await res.json();
-
-      if (!res.ok) {
-        setEditError(json.error || "Failed to edit post");
-      } else {
-        await loadPosts();
-        if (
-          selectedPost &&
-          selectedPost.fb_post_id === editingPost.fb_post_id
-        ) {
-          setSelectedPost((prev) =>
-            prev ? { ...prev, message: trimmed } : prev
-          );
-        }
-        cancelEdit();
-      }
+      if (!res.ok) throw new Error(json.error || "Failed to edit post");
+      setEditingId(null);
+      setEditMessage("");
+      fetchPosts();
     } catch (err) {
       console.error(err);
-      setEditError("Network error while editing post");
+      alert("Edit failed: " + (err.message || err));
     } finally {
-      setEditing(false);
+      setEditLoading(false);
     }
-  };
+  }
 
-  const handleDeletePost = async (post) => {
-    if (!window.confirm("Delete this post on Facebook as well?")) return;
-
+  async function deletePost(post) {
+    if (!confirm("Delete this Facebook post? This removes it from Facebook.")) {
+      return;
+    }
     try {
       const res = await fetch(
         `/api/facebook/page-posts?fb_post_id=${encodeURIComponent(
@@ -287,30 +218,20 @@ export default function CampaignList() {
         { method: "DELETE" }
       );
       const json = await res.json();
-      if (!res.ok) {
-        alert(json.error || "Failed to delete post");
-      } else {
-        await loadPosts();
-        if (selectedPost && selectedPost.fb_post_id === post.fb_post_id) {
-          setSelectedPost(null);
-          setComments([]);
-        }
-      }
+      if (!res.ok) throw new Error(json.error || "Failed to delete");
+      fetchPosts();
     } catch (err) {
       console.error(err);
-      alert("Network error while deleting post");
+      alert("Delete failed: " + (err.message || err));
     }
-  };
+  }
 
-  // -------- Comments handlers --------
-  const loadComments = async (post) => {
-    setSelectedPost(post);
+  // comments
+  async function openCommentsDrawer(post) {
+    setActivePostForComments(post);
     setComments([]);
-    setReplyMessage("");
-    setCommentsLoading(true);
-    setCommentsError(null);
-    setCommentActionError(null);
-
+    setCommentError("");
+    setLoadingComments(true);
     try {
       const res = await fetch(
         `/api/facebook/comments?fb_post_id=${encodeURIComponent(
@@ -318,666 +239,549 @@ export default function CampaignList() {
         )}`
       );
       const json = await res.json();
-      if (!res.ok) {
-        setCommentsError(json.error || "Failed to load comments");
-      } else {
-        setComments(json.data || []);
-      }
+      if (!res.ok) throw new Error(json.error || "Failed to load comments");
+      setComments(json.data || []);
     } catch (err) {
       console.error(err);
-      setCommentsError("Network error while loading comments");
+      setCommentError(String(err.message || err));
     } finally {
-      setCommentsLoading(false);
+      setLoadingComments(false);
     }
-  };
+  }
 
-  const handleReply = async () => {
-    const trimmed = replyMessage.trim();
-    if (!trimmed) {
-      setReplyError("Reply cannot be empty");
-      return;
-    }
-    if (!selectedPost) return;
+  function closeCommentsDrawer() {
+    setActivePostForComments(null);
+    setComments([]);
+    setNewComment("");
+    setCommentError("");
+  }
 
-    setReplying(true);
-    setReplyError(null);
-
+  async function sendComment(parentCommentId = null) {
+    if (!activePostForComments || !newComment.trim()) return;
     try {
+      setCommentLoading(true);
       const res = await fetch("/api/facebook/comments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          fb_post_id: selectedPost.fb_post_id,
-          message: trimmed,
+          fb_post_id: parentCommentId ? null : activePostForComments.fb_post_id,
+          parent_comment_id: parentCommentId,
+          message: newComment,
         }),
       });
-
       const json = await res.json();
-      if (!res.ok) {
-        setReplyError(json.error || "Failed to post reply");
-      } else {
-        setReplyMessage("");
-        await loadComments(selectedPost);
-      }
+      if (!res.ok) throw new Error(json.error || "Failed to send comment");
+      setComments((prev) => [json.data, ...prev]);
+      setNewComment("");
     } catch (err) {
       console.error(err);
-      setReplyError("Network error while posting reply");
+      alert("Comment failed: " + (err.message || err));
     } finally {
-      setReplying(false);
+      setCommentLoading(false);
     }
-  };
+  }
 
-  const handleToggleHide = async (comment) => {
-    if (!selectedPost) return;
-    setCommentBusyId(comment.fb_comment_id);
-    setCommentActionError(null);
+  async function deleteComment(commentId) {
+    if (!confirm("Delete this comment on Facebook?")) return;
+    try {
+      const res = await fetch(
+        `/api/facebook/comments?fb_comment_id=${encodeURIComponent(
+          commentId
+        )}`,
+        { method: "DELETE" }
+      );
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to delete comment");
+      setComments((prev) => prev.filter((c) => c.fb_comment_id !== commentId));
+    } catch (err) {
+      console.error(err);
+      alert("Delete comment failed: " + (err.message || err));
+    }
+  }
 
+  async function toggleHideComment(comment, nextHidden) {
     try {
       const res = await fetch("/api/facebook/comments", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           fb_comment_id: comment.fb_comment_id,
-          is_hidden: !comment.is_hidden,
+          is_hidden: nextHidden,
         }),
       });
-
       const json = await res.json();
-      if (!res.ok) {
-        setCommentActionError(json.error || "Failed to update comment");
-      } else {
-        await loadComments(selectedPost);
-      }
-    } catch (err) {
-      console.error(err);
-      setCommentActionError("Network error while updating comment");
-    } finally {
-      setCommentBusyId(null);
-    }
-  };
-
-  const handleDeleteComment = async (comment) => {
-    if (!selectedPost) return;
-    if (!window.confirm("Delete this comment on Facebook as well?")) return;
-
-    setCommentBusyId(comment.fb_comment_id);
-    setCommentActionError(null);
-
-    try {
-      const res = await fetch(
-        `/api/facebook/comments?fb_comment_id=${encodeURIComponent(
-          comment.fb_comment_id
-        )}`,
-        { method: "DELETE" }
+      if (!res.ok) throw new Error(json.error || "Failed to update comment");
+      setComments((prev) =>
+        prev.map((c) =>
+          c.fb_comment_id === comment.fb_comment_id ? json.data : c
+        )
       );
-      const json = await res.json();
-      if (!res.ok) {
-        setCommentActionError(json.error || "Failed to delete comment");
-      } else {
-        await loadComments(selectedPost);
-      }
     } catch (err) {
       console.error(err);
-      setCommentActionError("Network error while deleting comment");
-    } finally {
-      setCommentBusyId(null);
+      alert("Hide/unhide failed: " + (err.message || err));
     }
-  };
-
-  // -------- UI helpers --------
-  const postsSubtitle = useMemo(() => {
-    if (loading) return "Loading latest posts…";
-    if (error) return "";
-    const total = posts.length;
-    if (!total) return "No posts found yet for this Facebook Page.";
-    const showing = visiblePosts.length;
-    if (search.trim()) {
-      return `Showing ${showing} of ${filteredPosts.length} matching posts`;
-    }
-    return `Showing latest ${showing} of ${total} posts`;
-  }, [
-    loading,
-    error,
-    posts.length,
-    visiblePosts.length,
-    filteredPosts.length,
-    search,
-  ]);
-
-  const hasPostsPagination = filteredPosts.length > POSTS_PAGE_SIZE;
+  }
 
   return (
-    <Card className="h-full">
-      <CardHeader className="space-y-2">
-        <div className="flex items-center justify-between gap-2">
+    <div className="min-h-screen bg-[#18191a] text-[#e4e6eb]">
+      {/* top bar */}
+      <div className="border-b border-[#3a3b3c] px-6 py-4 flex items-center justify-between sticky top-0 z-20 bg-[#18191a]/90 backdrop-blur">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-full bg-[#2374e1] flex items-center justify-center">
+            <Facebook className="w-5 h-5 text-white" />
+          </div>
           <div>
-            <CardTitle className="text-base">Facebook Page Posts</CardTitle>
-            <p className="text-xs text-muted-foreground">{postsSubtitle}</p>
-          </div>
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={loadPosts}
-              disabled={loading}
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                  Refreshing
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="mr-2 h-3 w-3" />
-                  Refresh
-                </>
-              )}
-            </Button>
-            <Button size="sm" onClick={() => setShowForm((v) => !v)}>
-              <Plus className="mr-1.5 h-4 w-4" />
-              {showForm ? "Close" : "New Post"}
-            </Button>
+            <div className="font-semibold flex items-center gap-2">
+              Facebook Campaigns
+              <span className="px-2 py-0.5 text-xs rounded-full bg-[#3a3b3c] text-[#b0b3b8]">
+                Admin
+              </span>
+            </div>
+            <div className="text-xs text-[#b0b3b8]">
+              Manage posts, comments & AI copy
+            </div>
           </div>
         </div>
 
-        {/* Search bar */}
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search posts by text…"
-            className="flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          />
+        <button
+          onClick={() => setShowCreate((v) => !v)}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#2374e1] hover:bg-[#1b63c9] text-sm font-medium"
+        >
+          <ImageIcon className="w-4 h-4" />
+          {showCreate ? "Close composer" : "Create post"}
+        </button>
+      </div>
+
+      {error && (
+        <div className="px-6 pt-3">
+          <div className="bg-[#3a3b3c] text-red-300 text-sm rounded-lg px-4 py-2 border border-red-500/40">
+            {error}
+          </div>
         </div>
-      </CardHeader>
+      )}
 
-      <CardContent className="space-y-4">
-        {/* New post form */}
-        {showForm && (
-          <div className="space-y-3 rounded-md border bg-muted/40 p-3">
-            <p className="text-xs text-muted-foreground">
-              Create a new post on your Facebook Page. You can publish{" "}
-              <span className="font-semibold">text only</span> or{" "}
-              <span className="font-semibold">text + image</span>.
-            </p>
+      {/* composer */}
+      {showCreate && (
+        <div className="px-6 pt-4">
+          <div className="max-w-2xl bg-[#242526] rounded-xl border border-[#3a3b3c] p-4 mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <div className="font-semibold text-sm">Create post</div>
+              <button
+                onClick={() => setShowCreate(false)}
+                className="text-[#b0b3b8] hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
 
-            {/* Message */}
-            <div className="space-y-1">
-              <label className="text-[11px] font-medium">Post message</label>
+            <form onSubmit={handleCreatePost} className="space-y-3">
               <textarea
-                rows={3}
+                className="w-full bg-[#3a3b3c] rounded-lg px-3 py-2 text-sm outline-none resize-none min-h-[80px]"
+                placeholder="What's on your mind?"
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                placeholder="Write your post content…"
               />
-            </div>
 
-            {/* File upload */}
-            <div className="space-y-1">
-              <label className="text-[11px] font-medium">
-                Image file (optional)
-              </label>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleMediaFileChange}
-                className="w-full text-xs"
+              <textarea
+                className="w-full bg-[#3a3b3c] rounded-lg px-3 py-2 text-xs outline-none resize-none min-h-[40px]"
+                placeholder="#hashtags (optional)"
+                value={tags}
+                onChange={(e) => setTags(e.target.value)}
               />
-              <p className="text-[10px] text-muted-foreground">
-                The image will be uploaded to Supabase Storage and posted to
-                Facebook as a photo.
-              </p>
-            </div>
 
-            {/* Manual image URL (fallback) */}
-            <div className="space-y-1">
-              <label className="text-[11px] font-medium">
-                Image URL (optional, if you don&apos;t upload a file)
-              </label>
-              <input
-                type="url"
-                value={mediaUrl}
-                onChange={(e) => {
-                  setMediaUrl(e.target.value);
-                  setMediaUrlTouched(true);
-                  if (e.target.value) {
-                    setMediaFile(null);
-                    setMediaPreview(null);
-                  }
-                }}
-                placeholder="https://example.com/your-image.jpg"
-                className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              />
-            </div>
-
-            {/* Preview */}
-            {(mediaPreview || (mediaUrlTouched && mediaUrl.trim())) && (
-              <div className="space-y-1">
-                <p className="text-[11px] font-medium">Preview</p>
-                <div className="overflow-hidden rounded-md border bg-background">
-                  <img
-                    src={mediaPreview || mediaUrl.trim()}
-                    alt="Post preview"
-                    className="max-h-48 w-full object-cover"
-                    onError={(e) => {
-                      e.currentTarget.style.display = "none";
-                    }}
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="inline-flex items-center gap-2 text-xs px-3 py-2 rounded-full bg-[#3a3b3c] cursor-pointer hover:bg-[#4a4b4d]">
+                  <ImageIcon className="w-4 h-4" />
+                  <span>Photo / Video</span>
+                  <input
+                    type="file"
+                    accept="image/*,video/*"
+                    className="hidden"
+                    onChange={onFileChange}
                   />
-                </div>
+                </label>
+
+                <button
+                  type="button"
+                  onClick={handleGenerateCopy}
+                  disabled={aiLoading}
+                  className={cn(
+                    "inline-flex items-center gap-2 text-xs px-3 py-2 rounded-full bg-[#3a3b3c] hover:bg-[#4a4b4d]",
+                    aiLoading && "opacity-60 cursor-not-allowed"
+                  )}
+                >
+                  {aiLoading ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Wand2 className="w-3 h-3" />
+                  )}
+                  <span>AI optimize & hashtags</span>
+                </button>
               </div>
-            )}
 
-            {postError && (
-              <p className="text-xs text-red-500">{postError}</p>
-            )}
-
-            <div className="flex justify-end gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setShowForm(false);
-                  setMessage("");
-                  setMediaUrl("");
-                  setMediaUrlTouched(false);
-                  setMediaFile(null);
-                  setMediaPreview(null);
-                  setPostError(null);
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                onClick={handleCreatePost}
-                disabled={posting || uploadingMedia}
-              >
-                {uploadingMedia
-                  ? "Uploading…"
-                  : posting
-                  ? "Posting…"
-                  : "Post to Facebook"}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Edit form */}
-        {editingPost && (
-          <div className="space-y-2 rounded-md border bg-muted/40 p-3">
-            <p className="text-xs text-muted-foreground">
-              Editing post from{" "}
-              {editingPost.created_time
-                ? new Date(editingPost.created_time).toLocaleString()
-                : "—"}
-            </p>
-            <textarea
-              rows={3}
-              value={editMessage}
-              onChange={(e) => setEditMessage(e.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            />
-            {editError && (
-              <p className="text-xs text-red-500">{editError}</p>
-            )}
-            <div className="flex justify-end gap-2">
-              <Button size="sm" variant="outline" onClick={cancelEdit}>
-                Cancel
-              </Button>
-              <Button size="sm" onClick={handleSaveEdit} disabled={editing}>
-                {editing ? "Saving…" : "Save changes"}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Main layout: posts list + details/comments */}
-        <div className="grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-          {/* Posts list */}
-          <div className="space-y-2">
-            {loading && (
-              <p className="text-sm text-muted-foreground">Loading posts…</p>
-            )}
-            {!loading && error && (
-              <p className="text-sm text-red-500">{error}</p>
-            )}
-            {!loading && !error && visiblePosts.length === 0 && (
-              <p className="text-sm text-muted-foreground">
-                No posts match your filters yet.
-              </p>
-            )}
-
-            {!loading &&
-              !error &&
-              visiblePosts.map((p) => {
-                const isSelected =
-                  selectedPost && selectedPost.fb_post_id === p.fb_post_id;
-                const attachment = getPrimaryAttachment(p);
-
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => loadComments(p)}
-                    className={`w-full rounded-lg border px-3 py-2 text-left text-xs shadow-sm transition hover:bg-muted ${
-                      isSelected ? "border-primary bg-muted" : "bg-background"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      {/* Thumbnail */}
-                      <div className="flex-shrink-0">
-                        {attachment?.imageSrc ? (
-                          <img
-                            src={attachment.imageSrc}
-                            alt={attachment.mediaType || "Media"}
-                            className="h-10 w-10 rounded-md object-cover"
-                          />
-                        ) : attachment?.mediaType === "video" ? (
-                          <div className="flex h-10 w-10 items-center justify-center rounded-md border text-[10px] text-muted-foreground">
-                            Video
-                          </div>
-                        ) : (
-                          <div className="flex h-10 w-10 items-center justify-center rounded-md border text-[10px] text-muted-foreground">
-                            Text
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Text + meta */}
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">
-                            {p.message
-                              ? p.message.slice(0, 60) +
-                                (p.message.length > 60 ? "…" : "")
-                              : "No text"}
-                          </span>
-                        </div>
-                        <p className="mt-1 text-[10px] text-muted-foreground">
-                          {p.created_time
-                            ? new Date(p.created_time).toLocaleString()
-                            : "—"}
-                        </p>
-                      </div>
-
-                      {/* Actions */}
-                      <div className="flex flex-col items-end gap-1">
-                        {p.permalink_url && (
-                          <a
-                            href={p.permalink_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1 text-[10px] text-primary underline"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <Eye className="h-3 w-3" />
-                            View
-                          </a>
-                        )}
-                        <div className="flex gap-1">
-                          <Button
-                            size="icon"
-                            variant="outline"
-                            className="h-6 w-6"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              startEdit(p);
-                            }}
-                          >
-                            <Pencil className="h-3 w-3" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="destructive"
-                            className="h-6 w-6"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeletePost(p);
-                            }}
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-
-            {/* Load more / show less */}
-            {!loading && !error && hasPostsPagination && (
-              <div className="flex items-center justify-between pt-1">
-                <p className="text-[11px] text-muted-foreground">
-                  Showing {visiblePosts.length} of {filteredPosts.length} posts
-                </p>
-                <div className="flex gap-2">
-                  {hasMore && (
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      onClick={() =>
-                        setVisibleCount((c) => c + POSTS_PAGE_SIZE)
-                      }
-                    >
-                      Load more
-                    </Button>
-                  )}
-                  {visibleCount > POSTS_PAGE_SIZE && (
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      onClick={() => setVisibleCount(POSTS_PAGE_SIZE)}
-                    >
-                      Show less
-                    </Button>
+              {mediaPreview && (
+                <div className="rounded-lg overflow-hidden border border-[#3a3b3c] bg-black max-h-64 flex items-center justify-center">
+                  {mediaType === "VIDEO" ? (
+                    <video
+                      src={mediaPreview}
+                      controls
+                      playsInline
+                      className="max-h-64 w-auto"
+                    />
+                  ) : (
+                    <img
+                      src={mediaPreview}
+                      alt="preview"
+                      className="max-h-64 w-auto object-contain"
+                    />
                   )}
                 </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={resetCreateForm}
+                  className="px-3 py-1.5 rounded-full text-xs bg-[#3a3b3c] hover:bg-[#4a4b4d]"
+                  disabled={creating}
+                >
+                  Clear
+                </button>
+                <button
+                  type="submit"
+                  disabled={creating || (!message.trim() && !mediaFile)}
+                  className={cn(
+                    "inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-medium bg-[#2374e1] hover:bg-[#1b63c9]",
+                    creating && "opacity-70 cursor-not-allowed"
+                  )}
+                >
+                  {creating ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Send className="w-4 h-4" />
+                  )}
+                  <span>Post now</span>
+                </button>
               </div>
-            )}
-          </div>
-
-          {/* Details + comments */}
-          <div className="space-y-3 rounded-lg border bg-muted/40 p-3 text-xs">
-            {!selectedPost && (
-              <p className="text-xs text-muted-foreground">
-                Select a post on the left to see full content, media preview,
-                reply as your Page, and manage comments.
-              </p>
-            )}
-
-            {selectedPost && (
-              <>
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1 space-y-1">
-                    <p className="text-[11px] font-semibold">
-                      Selected post details
-                    </p>
-                    <p className="whitespace-pre-wrap">
-                      {selectedPost.message || "No text"}
-                    </p>
-                    <p className="text-[10px] text-muted-foreground">
-                      {selectedPost.created_time
-                        ? new Date(
-                            selectedPost.created_time
-                          ).toLocaleString()
-                        : "—"}
-                    </p>
-                  </div>
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    onClick={() => {
-                      setSelectedPost(null);
-                      setComments([]);
-                      setReplyMessage("");
-                    }}
-                  >
-                    Clear
-                  </Button>
-                </div>
-
-                {/* Media preview */}
-                {(() => {
-                  const attachment = getPrimaryAttachment(selectedPost);
-                  if (!attachment) return null;
-
-                  if (attachment.mediaType === "video") {
-                    return (
-                      <div className="mt-2 overflow-hidden rounded-md border bg-background">
-                        <video
-                          src={attachment.url || attachment.imageSrc}
-                          controls
-                          className="max-h-64 w-full"
-                        />
-                      </div>
-                    );
-                  }
-
-                  if (attachment.imageSrc) {
-                    return (
-                      <div className="mt-2 overflow-hidden rounded-md border bg-background">
-                        <img
-                          src={attachment.imageSrc}
-                          alt={attachment.mediaType || "Post media"}
-                          className="max-h-64 w-full object-cover"
-                        />
-                      </div>
-                    );
-                  }
-
-                  return null;
-                })()}
-
-                {/* Reply box */}
-                <div className="mt-3 space-y-2 rounded-md bg-background p-2">
-                  <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                    <MessageCircle className="h-3 w-3" />
-                    <span>Reply to this post as your Page</span>
-                  </div>
-                  <textarea
-                    rows={2}
-                    value={replyMessage}
-                    onChange={(e) => setReplyMessage(e.target.value)}
-                    className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    placeholder="Type your reply…"
-                  />
-                  {replyError && (
-                    <p className="text-[11px] text-red-500">{replyError}</p>
-                  )}
-                  <div className="flex justify-end">
-                    <Button
-                      size="sm"
-                      onClick={handleReply}
-                      disabled={replying}
-                    >
-                      {replying ? "Replying…" : "Reply as Page"}
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Comments list */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-[11px] font-semibold">Comments</p>
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      onClick={() => loadComments(selectedPost)}
-                      disabled={commentsLoading}
-                    >
-                      {commentsLoading ? "Refreshing…" : "Reload"}
-                    </Button>
-                  </div>
-                  {commentsLoading && (
-                    <p className="text-[11px] text-muted-foreground">
-                      Loading comments…
-                    </p>
-                  )}
-                  {!commentsLoading && commentsError && (
-                    <p className="text-[11px] text-red-500">
-                      {commentsError}
-                    </p>
-                  )}
-                  {!commentsLoading &&
-                    !commentsError &&
-                    comments.length === 0 && (
-                      <p className="text-[11px] text-muted-foreground">
-                        No comments on this post yet.
-                      </p>
-                    )}
-
-                  {!commentsLoading &&
-                    !commentsError &&
-                    comments.length > 0 && (
-                      <div className="space-y-2 max-h-64 overflow-y-auto">
-                        {commentActionError && (
-                          <p className="text-[11px] text-red-500">
-                            {commentActionError}
-                          </p>
-                        )}
-                        {comments.map((c) => (
-                          <div
-                            key={c.id}
-                            className={`rounded-md border bg-background px-2 py-1.5 ${
-                              c.is_hidden ? "opacity-60" : ""
-                            }`}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium">
-                                {c.from_name || "Unknown user"}
-                              </span>
-                              <span className="text-[10px] text-muted-foreground">
-                                {c.created_time
-                                  ? new Date(
-                                      c.created_time
-                                    ).toLocaleString()
-                                  : ""}
-                              </span>
-                            </div>
-                            <p className="mt-1 whitespace-pre-wrap text-[11px]">
-                              {c.message || ""}
-                            </p>
-                            <div className="mt-1 flex items-center justify-between">
-                              <span className="text-[10px] text-muted-foreground">
-                                {c.is_hidden ? "Hidden" : "Visible"}
-                              </span>
-                              <div className="flex gap-1">
-                                <Button
-                                  size="xs"
-                                  variant="outline"
-                                  className="h-6 px-2"
-                                  onClick={() => handleToggleHide(c)}
-                                  disabled={
-                                    commentBusyId === c.fb_comment_id
-                                  }
-                                >
-                                  {c.is_hidden ? "Unhide" : "Hide"}
-                                </Button>
-                                <Button
-                                  size="xs"
-                                  variant="destructive"
-                                  className="h-6 px-2"
-                                  onClick={() => handleDeleteComment(c)}
-                                  disabled={
-                                    commentBusyId === c.fb_comment_id
-                                  }
-                                >
-                                  Delete
-                                </Button>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                </div>
-              </>
-            )}
+            </form>
           </div>
         </div>
-      </CardContent>
-    </Card>
+      )}
+
+      {/* posts feed */}
+      <div className="px-6 pt-4 pb-10 max-w-3xl mx-auto">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-sm font-semibold flex items-center gap-2">
+            Recent posts
+            <button
+              onClick={fetchPosts}
+              className="text-xs px-2 py-1 rounded-full bg-[#3a3b3c] hover:bg-[#4a4b4d]"
+            >
+              Refresh
+            </button>
+          </div>
+          <div className="flex items-center gap-2 text-[11px] text-[#b0b3b8]">
+            <ChevronDown className="w-3 h-3" />
+            Newest first
+          </div>
+        </div>
+
+        {loadingPosts && (
+          <div className="flex items-center justify-center py-10 text-[#b0b3b8]">
+            <Loader2 className="w-5 h-5 animate-spin mr-2" />
+            Loading posts…
+          </div>
+        )}
+
+        {!loadingPosts && posts.length === 0 && (
+          <div className="text-center text-[#b0b3b8] text-sm py-10 bg-[#242526] border border-[#3a3b3c] rounded-xl">
+            No posts yet. Create your first campaign post above.
+          </div>
+        )}
+
+        <div className="space-y-4">
+          {posts.map((post) => {
+            const created = post.created_time
+              ? new Date(post.created_time)
+              : null;
+            const createdLabel = created
+              ? created.toLocaleString()
+              : "Unknown date";
+
+            // ✅ better media extraction for playable video
+            const rawAttachments = post.attachments;
+            const attachment = Array.isArray(rawAttachments?.data)
+              ? rawAttachments.data[0]
+              : rawAttachments?.data || rawAttachments || null;
+
+            const isVideo =
+              attachment?.media_type === "video" ||
+              attachment?.type === "video_inline" ||
+              attachment?.type === "video";
+
+            const mediaUrl =
+              (isVideo && attachment?.media?.source) ||
+              attachment?.media?.image?.src ||
+              attachment?.media?.source ||
+              attachment?.url ||
+              null;
+
+            const likes =
+              post.reactions_count ??
+              post.insights?.find((i) => i.name === "post_engaged_users")
+                ?.values?.[0]?.value ??
+              0;
+            const commentsCount = post.comments_count ?? 0;
+
+            return (
+              <article
+                key={post.id || post.fb_post_id}
+                className="bg-[#242526] rounded-xl border border-[#3a3b3c] overflow-hidden"
+              >
+                {/* header */}
+                <div className="px-4 pt-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-full bg-[#3a3b3c]" />
+                    <div>
+                      <div className="text-sm font-semibold">
+                        Facebook Page
+                      </div>
+                      <div className="text-[11px] text-[#b0b3b8]">
+                        {createdLabel}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 text-[11px] text-[#b0b3b8]">
+                    {post.permalink_url && (
+                      <a
+                        href={post.permalink_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="hover:underline"
+                      >
+                        View on Facebook
+                      </a>
+                    )}
+                  </div>
+                </div>
+
+                {/* body */}
+                <div className="px-4 pt-2 pb-1 text-sm whitespace-pre-wrap">
+                  {editingId === post.fb_post_id ? (
+                    <div className="space-y-2">
+                      <textarea
+                        value={editMessage}
+                        onChange={(e) => setEditMessage(e.target.value)}
+                        className="w-full bg-[#3a3b3c] rounded-lg px-3 py-2 text-sm outline-none resize-none min-h-[70px]"
+                      />
+                      <div className="flex justify-end gap-2">
+                        <button
+                          className="text-xs px-3 py-1 rounded-full bg-[#3a3b3c]"
+                          onClick={() => {
+                            setEditingId(null);
+                            setEditMessage("");
+                          }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={saveEdit}
+                          disabled={editLoading || !editMessage.trim()}
+                          className={cn(
+                            "text-xs px-3 py-1 rounded-full bg-[#2374e1] hover:bg-[#1b63c9]",
+                            editLoading && "opacity-60 cursor-not-allowed"
+                          )}
+                        >
+                          {editLoading ? "Saving…" : "Save"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>{post.message}</>
+                  )}
+                </div>
+
+                {/* ✅ media (video now prefers media.source and is playable) */}
+                {mediaUrl && (
+                  <div className="mt-1 bg-black flex items-center justify-center max-h-[480px]">
+                    {isVideo ? (
+                      <video
+                        key={post.fb_post_id}
+                        src={mediaUrl}
+                        controls
+                        playsInline
+                        className="max-h-[480px] w-full object-contain"
+                      />
+                    ) : (
+                      <img
+                        src={mediaUrl}
+                        alt=""
+                        className="max-h-[480px] w-full object-contain"
+                      />
+                    )}
+                  </div>
+                )}
+
+                {/* footer */}
+                <div className="px-4 pt-2 pb-2 border-t border-[#3a3b3c]">
+                  <div className="flex items-center justify-between text-[11px] text-[#b0b3b8] mb-1.5">
+                    <div className="flex items-center gap-3">
+                      <span className="inline-flex items-center gap-1">
+                        <ThumbsUp className="w-3 h-3" />
+                        {likes || 0} likes
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <MessageCircle className="w-3 h-3" />
+                        {commentsCount || 0} comments
+                      </span>
+                    </div>
+                    <span className="inline-flex items-center gap-1">
+                      <Eye className="w-3 h-3" />
+                      {post.insights ? "Insights captured" : "No insights"}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs pt-1 border-t border-[#3a3b3c]/80 mt-1">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => openCommentsDrawer(post)}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-full hover:bg-[#3a3b3c]"
+                      >
+                        <MessageCircle className="w-3 h-3" />
+                        Comments
+                      </button>
+                      <button
+                        onClick={() => openEdit(post)}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-full hover:bg-[#3a3b3c]"
+                      >
+                        <Edit className="w-3 h-3" />
+                        Edit
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => deletePost(post)}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-full hover:bg-[#3a3b3c] text-red-300"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* comments drawer */}
+      {activePostForComments && (
+        <div className="fixed inset-0 bg-black/50 z-40 flex justify-end">
+          <div className="w-full max-w-md h-full bg-[#242526] border-l border-[#3a3b3c] flex flex-col">
+            <div className="px-4 py-3 border-b border-[#3a3b3c] flex items-center justify-between">
+              <div className="font-semibold text-sm flex items-center gap-2">
+                <MessageCircle className="w-4 h-4" />
+                Comments
+              </div>
+              <button
+                onClick={closeCommentsDrawer}
+                className="text-[#b0b3b8] hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 text-sm">
+              {loadingComments && (
+                <div className="flex items-center justify-center py-4 text-[#b0b3b8]">
+                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  Loading comments…
+                </div>
+              )}
+              {commentError && (
+                <div className="text-red-300 text-xs">{commentError}</div>
+              )}
+              {!loadingComments && comments.length === 0 && (
+                <div className="text-xs text-[#b0b3b8]">
+                  No comments yet on this post.
+                </div>
+              )}
+              {comments.map((c) => (
+                <div
+                  key={c.fb_comment_id}
+                  className={cn(
+                    "rounded-lg px-3 py-2 bg-[#3a3b3c]",
+                    c.is_hidden && "opacity-60"
+                  )}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="font-semibold text-xs">
+                      {c.from_name || "User"}
+                    </div>
+                    <div className="flex items-center gap-2 text-[10px] text-[#b0b3b8]">
+                      {c.like_count != null && (
+                        <span>{c.like_count} likes</span>
+                      )}
+                      {c.created_time && (
+                        <span>
+                          {new Date(c.created_time).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-xs whitespace-pre-wrap">
+                    {c.message}
+                  </div>
+                  <div className="flex items-center gap-2 mt-1 text-[11px]">
+                    <button
+                      onClick={() => setNewComment(`@${c.from_name} `)}
+                      className="hover:underline"
+                    >
+                      Reply
+                    </button>
+                    <button
+                      onClick={() => toggleHideComment(c, !c.is_hidden)}
+                      className="hover:underline"
+                    >
+                      {c.is_hidden ? "Unhide" : "Hide"}
+                    </button>
+                    <button
+                      onClick={() => deleteComment(c.fb_comment_id)}
+                      className="text-red-300 hover:underline"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="border-t border-[#3a3b3c] p-3">
+              <div className="flex items-center gap-2">
+                <input
+                  value={newComment}
+                  onChange={(e) => setNewComment(e.target.value)}
+                  placeholder="Write a comment…"
+                  className="flex-1 bg-[#3a3b3c] rounded-full px-3 py-2 text-xs outline-none"
+                />
+                <button
+                  onClick={() => sendComment(null)}
+                  disabled={commentLoading || !newComment.trim()}
+                  className={cn(
+                    "w-9 h-9 rounded-full bg-[#2374e1] flex items-center justify-center",
+                    commentLoading && "opacity-60 cursor-not-allowed"
+                  )}
+                >
+                  {commentLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Send className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

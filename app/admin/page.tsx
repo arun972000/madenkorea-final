@@ -19,6 +19,8 @@ import {
   FileText,
   LogOut,
   Megaphone,
+  Facebook,
+  Instagram,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -86,6 +88,7 @@ export default function AdminDashboard() {
           <p className="text-muted-foreground">Overview of your store</p>
         </div>
 
+        {/* METRICS */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <Card>
             <CardHeader className="pb-3">
@@ -142,6 +145,7 @@ export default function AdminDashboard() {
 
         {/* ACTION CARDS */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {/* Products */}
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader>
               <Package className="h-8 w-8 mb-2 text-primary" />
@@ -163,6 +167,7 @@ export default function AdminDashboard() {
             </CardContent>
           </Card>
 
+          {/* Orders */}
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader>
               <ShoppingCart className="h-8 w-8 mb-2 text-primary" />
@@ -183,6 +188,7 @@ export default function AdminDashboard() {
             </CardContent>
           </Card>
 
+          {/* Vendors */}
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader>
               <Users className="h-8 w-8 mb-2 text-primary" />
@@ -203,7 +209,7 @@ export default function AdminDashboard() {
             </CardContent>
           </Card>
 
-          {/* NEW: Influencers */}
+          {/* Influencers */}
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader>
               <Megaphone className="h-8 w-8 mb-2 text-primary" />
@@ -226,6 +232,77 @@ export default function AdminDashboard() {
             </CardContent>
           </Card>
 
+          {/* Instagram Marketing */}
+          <Card className="hover:shadow-lg transition-shadow">
+            <CardHeader>
+              <Instagram className="h-8 w-8 mb-2 text-primary" />
+              <CardTitle>Instagram Marketing</CardTitle>
+              <CardDescription>
+                Schedule, post & manage IG content
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground mb-4">
+                Access the Instagram panel for posts, AI captions, comments, and
+                performance.
+              </p>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => router.push("/admin/marketing/instagram")}
+              >
+                Open Instagram Panel
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Facebook Marketing */}
+          <Card className="hover:shadow-lg transition-shadow">
+            <CardHeader>
+              <Facebook className="h-8 w-8 mb-2 text-primary" />
+              <CardTitle>Facebook Marketing</CardTitle>
+              <CardDescription>
+                Manage page posts & comments
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground mb-4">
+                Use the Facebook panel to create posts, reply to comments and
+                optimize content with AI.
+              </p>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => router.push("/admin/marketing/facebook")}
+              >
+                Open Facebook Panel
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Social Connections / Tokens */}
+          <Card className="hover:shadow-lg transition-shadow">
+            <CardHeader>
+              <Settings className="h-8 w-8 mb-2 text-primary" />
+              <CardTitle>Social Connections</CardTitle>
+              <CardDescription>Connect Facebook & Instagram tokens</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground mb-4">
+                Configure and update access tokens used for Facebook and
+                Instagram marketing tools.
+              </p>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => router.push("/admin/instagram/settings")}
+              >
+                Open Social Settings
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* CMS */}
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader>
               <FileText className="h-8 w-8 mb-2 text-primary" />
@@ -246,6 +323,7 @@ export default function AdminDashboard() {
             </CardContent>
           </Card>
 
+          {/* Analytics */}
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader>
               <TrendingUp className="h-8 w-8 mb-2 text-primary" />
@@ -266,10 +344,11 @@ export default function AdminDashboard() {
             </CardContent>
           </Card>
 
+          {/* Store Settings */}
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader>
               <Settings className="h-8 w-8 mb-2 text-primary" />
-              <CardTitle>Settings</CardTitle>
+              <CardTitle>Store Settings</CardTitle>
               <CardDescription>Configure your store</CardDescription>
             </CardHeader>
             <CardContent>
