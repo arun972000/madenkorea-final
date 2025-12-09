@@ -180,39 +180,56 @@ export default function InstagramMediaPanel() {
   /* ---------- AI caption helper ---------- */
 
   const runAiOptimization = async (
-    baseText: string,
-    setterCaption: (v: string) => void,
-    setterTags: (v: string) => void,
-    setLoadingFlag: (v: boolean) => void
-  ) => {
-    const text = baseText.trim();
-    if (!text) {
-      alert("Base caption / text is required");
-      return;
+  baseText: string,
+  setterCaption: (v: string) => void,
+  setterTags: (v: string) => void,
+  setLoadingFlag: (v: boolean) => void
+) => {
+  const text = baseText.trim();
+  if (!text) {
+    alert("Base caption / text is required");
+    return;
+  }
+
+  try {
+    setLoadingFlag(true);
+    const res = await fetch("/api/ai/social-copy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        baseText: text,
+        channel: "instagram",
+      }),
+    });
+
+    const json: AiCopyResponse & { error?: string } = await res.json();
+    if (!res.ok) {
+      throw new Error(json.error || "AI optimization failed");
     }
-    try {
-      setLoadingFlag(true);
-      const res = await fetch("/api/ai/social-copy", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          baseText: text,
-          channel: "instagram",
-        }),
-      });
-      const json: AiCopyResponse & { error?: string } = await res.json();
-      if (!res.ok) {
-        throw new Error(json.error || "AI optimization failed");
+
+    // Always keep caption as string
+    if (json.caption) {
+      setterCaption(String(json.caption));
+    }
+
+    // 🔑 Normalize hashtags into a single string
+    if (json.hashtags !== undefined) {
+      let tags = "";
+      if (Array.isArray(json.hashtags)) {
+        tags = json.hashtags.join(" ");
+      } else {
+        tags = String(json.hashtags);
       }
-      if (json.caption) setterCaption(json.caption);
-      if (json.hashtags) setterTags(json.hashtags);
-    } catch (e: any) {
-      console.error("AI optimize error", e);
-      alert(e.message || "AI optimization failed");
-    } finally {
-      setLoadingFlag(false);
+      setterTags(tags);
     }
-  };
+  } catch (e: any) {
+    console.error("AI optimize error", e);
+    alert(e.message || "AI optimization failed");
+  } finally {
+    setLoadingFlag(false);
+  }
+};
+
 
   /* ---------- New post: upload + publish ---------- */
 
