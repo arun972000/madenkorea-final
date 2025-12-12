@@ -28,7 +28,7 @@ type InstagramComment = {
 
 type AiCopyResponse = {
   caption: string;
-  hashtags?: string;
+  hashtags?: string | string[];
 };
 
 /* ---------- Media preview (image / video) ---------- */
@@ -95,6 +95,12 @@ export default function InstagramMediaPanel() {
   const [newTags, setNewTags] = useState("");
   const [aiLoadingNew, setAiLoadingNew] = useState(false);
 
+  // ⭐ Scheduling state (NEW)
+  const [isScheduled, setIsScheduled] = useState(false);
+  const [scheduledDate, setScheduledDate] = useState(""); // yyyy-MM-dd
+  const [scheduledTime, setScheduledTime] = useState(""); // HH:mm
+  const [scheduling, setScheduling] = useState(false);
+
   // Edit caption modal
   const [editMedia, setEditMedia] = useState<InstagramMedia | null>(null);
   const [editCaption, setEditCaption] = useState("");
@@ -133,6 +139,10 @@ export default function InstagramMediaPanel() {
     setNewTags("");
     setAiLoadingNew(false);
     setUploading(false);
+    setIsScheduled(false);
+    setScheduledDate("");
+    setScheduledTime("");
+    setScheduling(false);
   };
 
   /* ---------- Load media ---------- */
@@ -177,59 +187,73 @@ export default function InstagramMediaPanel() {
     fetchMedia();
   }, []);
 
+  /* ---------- Lightweight frontend "cron" (NEW) ---------- */
+  // This pings the backend processor every 60 seconds while the admin
+  // is on this page, so scheduled posts get picked up.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetch("/api/social/process-scheduled", { method: "POST" }).catch(
+        (err) => {
+          console.error("process-scheduled error", err);
+        }
+      );
+    }, 60_000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   /* ---------- AI caption helper ---------- */
 
   const runAiOptimization = async (
-  baseText: string,
-  setterCaption: (v: string) => void,
-  setterTags: (v: string) => void,
-  setLoadingFlag: (v: boolean) => void
-) => {
-  const text = baseText.trim();
-  if (!text) {
-    alert("Base caption / text is required");
-    return;
-  }
-
-  try {
-    setLoadingFlag(true);
-    const res = await fetch("/api/ai/social-copy", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        baseText: text,
-        channel: "instagram",
-      }),
-    });
-
-    const json: AiCopyResponse & { error?: string } = await res.json();
-    if (!res.ok) {
-      throw new Error(json.error || "AI optimization failed");
+    baseText: string,
+    setterCaption: (v: string) => void,
+    setterTags: (v: string) => void,
+    setLoadingFlag: (v: boolean) => void
+  ) => {
+    const text = baseText.trim();
+    if (!text) {
+      alert("Base caption / text is required");
+      return;
     }
 
-    // Always keep caption as string
-    if (json.caption) {
-      setterCaption(String(json.caption));
-    }
+    try {
+      setLoadingFlag(true);
+      const res = await fetch("/api/ai/social-copy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          baseText: text,
+          channel: "instagram",
+        }),
+      });
 
-    // 🔑 Normalize hashtags into a single string
-    if (json.hashtags !== undefined) {
-      let tags = "";
-      if (Array.isArray(json.hashtags)) {
-        tags = json.hashtags.join(" ");
-      } else {
-        tags = String(json.hashtags);
+      const json: AiCopyResponse & { error?: string } = await res.json();
+      if (!res.ok) {
+        throw new Error(json.error || "AI optimization failed");
       }
-      setterTags(tags);
-    }
-  } catch (e: any) {
-    console.error("AI optimize error", e);
-    alert(e.message || "AI optimization failed");
-  } finally {
-    setLoadingFlag(false);
-  }
-};
 
+      // Always keep caption as string
+      if (json.caption) {
+        setterCaption(String(json.caption));
+      }
+
+      // Normalize hashtags into a single string
+      if (json.hashtags !== undefined) {
+        let tags = "";
+        if (Array.isArray(json.hashtags)) {
+          tags = json.hashtags.join(" ");
+        } else {
+          tags = String(json.hashtags);
+        }
+        setterTags(tags);
+      }
+    } catch (e: any) {
+      console.error("AI optimize error", e);
+      alert(e.message || "AI optimization failed");
+    } finally {
+      setLoadingFlag(false);
+    }
+  };
 
   /* ---------- New post: upload + publish ---------- */
 
@@ -273,15 +297,22 @@ export default function InstagramMediaPanel() {
     }
   };
 
+  const buildFinalCaption = (caption: string, tags: string) => {
+    const c = caption.trim();
+    const t = tags.trim();
+    if (!c && !t) return "";
+    if (!t) return c;
+    if (!c) return t;
+    return `${c}\n\n${t}`;
+  };
+
   const handleCreatePost = async () => {
     if (!newMediaUrl) {
       alert("Please upload an image or video first.");
       return;
     }
 
-    const finalCaption =
-      newCaption.trim() +
-      (newTags.trim() ? "\n\n" + newTags.trim() : "");
+    const finalCaption = buildFinalCaption(newCaption, newTags);
 
     try {
       setUploading(true);
@@ -301,7 +332,6 @@ export default function InstagramMediaPanel() {
         throw new Error(json.error || "Failed to publish Instagram media");
       }
 
-      // add to top of feed
       if (json.data) {
         setMedia((prev) => [json.data, ...prev]);
       }
@@ -313,6 +343,69 @@ export default function InstagramMediaPanel() {
       alert(e.message || "Failed to publish Instagram media");
     } finally {
       setUploading(false);
+    }
+  };
+
+  /* ---------- NEW: Schedule post instead of posting now ---------- */
+
+  const handleSchedulePost = async () => {
+    if (!newMediaUrl) {
+      alert("Please upload an image or video first.");
+      return;
+    }
+
+    if (!scheduledDate || !scheduledTime) {
+      alert("Please select both date and time for scheduling.");
+      return;
+    }
+
+    const scheduledLocal = new Date(`${scheduledDate}T${scheduledTime}`);
+    if (isNaN(scheduledLocal.getTime())) {
+      alert("Invalid schedule date or time.");
+      return;
+    }
+
+    // Optional: prevent scheduling in the past
+    if (scheduledLocal.getTime() < Date.now() - 60_000) {
+      if (
+        !confirm(
+          "The selected time is in the past or very close to now. Schedule anyway?"
+        )
+      ) {
+        return;
+      }
+    }
+
+    const finalCaption = buildFinalCaption(newCaption, newTags);
+
+    try {
+      setScheduling(true);
+      const res = await fetch("/api/social/schedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channel: "instagram",
+          caption: finalCaption,
+          media_url: newMediaUrl,
+          media_type: newMediaType,
+          scheduled_at: scheduledLocal.toISOString(), // backend will treat as UTC
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok) {
+        console.error("POST /api/social/schedule", json);
+        throw new Error(json.error || "Failed to schedule Instagram post");
+      }
+
+      alert("Post scheduled successfully.");
+      resetNewPostState();
+      setShowNewModal(false);
+    } catch (e: any) {
+      console.error("handleSchedulePost error", e);
+      alert(e.message || "Failed to schedule Instagram post");
+    } finally {
+      setScheduling(false);
     }
   };
 
@@ -329,9 +422,7 @@ export default function InstagramMediaPanel() {
   const handleSaveEdit = async () => {
     if (!editMedia) return;
 
-    const finalCaption =
-      editCaption.trim() +
-      (editTags.trim() ? "\n\n" + editTags.trim() : "");
+    const finalCaption = buildFinalCaption(editCaption, editTags);
 
     if (!finalCaption) {
       alert("Caption cannot be empty.");
@@ -374,8 +465,6 @@ export default function InstagramMediaPanel() {
     }
   };
 
-
-  
   /* ---------- Comments ---------- */
 
   const openComments = async (item: InstagramMedia) => {
@@ -672,7 +761,50 @@ export default function InstagramMediaPanel() {
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2">
+              {/* ⭐ Scheduling controls (NEW) */}
+              <div className="space-y-2 pt-2 border-t">
+                <label className="inline-flex items-center gap-2 text-xs text-gray-700">
+                  <input
+                    type="checkbox"
+                    className="rounded border-gray-300"
+                    checked={isScheduled}
+                    onChange={(e) => setIsScheduled(e.target.checked)}
+                  />
+                  <span>Schedule this post instead of posting now</span>
+                </label>
+
+                {isScheduled && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex flex-col">
+                      <span className="text-[11px] text-gray-500 mb-0.5">
+                        Date
+                      </span>
+                      <input
+                        type="date"
+                        className="rounded-lg border border-gray-300 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-pink-500"
+                        value={scheduledDate}
+                        onChange={(e) => setScheduledDate(e.target.value)}
+                      />
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[11px] text-gray-500 mb-0.5">
+                        Time
+                      </span>
+                      <input
+                        type="time"
+                        className="rounded-lg border border-gray-300 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-pink-500"
+                        value={scheduledTime}
+                        onChange={(e) => setScheduledTime(e.target.value)}
+                      />
+                    </div>
+                    <span className="text-[11px] text-gray-400">
+                      Uses your local timezone (browser time).
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-3 pt-2">
                 <button
                   type="button"
                   onClick={() => {
@@ -683,14 +815,26 @@ export default function InstagramMediaPanel() {
                 >
                   Cancel
                 </button>
-                <button
-                  type="button"
-                  disabled={uploading}
-                  onClick={handleCreatePost}
-                  className="px-4 py-1.5 rounded-lg bg-emerald-600 text-sm text-white font-medium shadow-sm hover:bg-emerald-700 disabled:opacity-60"
-                >
-                  {uploading ? "Posting…" : "Post now"}
-                </button>
+
+                {!isScheduled ? (
+                  <button
+                    type="button"
+                    disabled={uploading}
+                    onClick={handleCreatePost}
+                    className="px-4 py-1.5 rounded-lg bg-emerald-600 text-sm text-white font-medium shadow-sm hover:bg-emerald-700 disabled:opacity-60"
+                  >
+                    {uploading ? "Posting…" : "Post now"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={scheduling || uploading}
+                    onClick={handleSchedulePost}
+                    className="px-4 py-1.5 rounded-lg bg-indigo-600 text-sm text-white font-medium shadow-sm hover:bg-indigo-700 disabled:opacity-60"
+                  >
+                    {scheduling ? "Scheduling…" : "Schedule post"}
+                  </button>
+                )}
               </div>
             </div>
           </div>

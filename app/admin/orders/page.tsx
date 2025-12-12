@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import {supabase} from '@/lib/supabaseClient';
+
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -20,24 +22,21 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
-import { Eye, LogOut, Download, Search, FileText } from 'lucide-react';
-import { toast } from 'sonner';
-import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-  {
-    auth: { persistSession: true, autoRefreshToken: true },
-  }
-);
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+
+import { Eye, LogOut, Download, Search, FileText, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
 
 type AdminOrderRow = {
   id: string;
@@ -66,17 +65,43 @@ function formatINR(v?: number | null, currency?: string | null) {
   }
 }
 
+// address_snapshot can be jsonb OR a stringified JSON
+function safeParseSnapshot(v: any): any {
+  if (!v) return {};
+  if (typeof v === 'object') return v;
+  if (typeof v === 'string') {
+    try {
+      return JSON.parse(v);
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
 export default function AdminOrdersPage() {
   const router = useRouter();
   const { user, hasRole, logout } = useAuth();
+  const isAdmin = hasRole('admin');
 
+  // UI state
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState('all');
   const [orders, setOrders] = useState<AdminOrderRow[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // compute once per render, not a hook:
-  const isAdmin = hasRole('admin');
+  // pagination
+  const PAGE_SIZE = 20;
+  const [page, setPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const from = (page - 1) * PAGE_SIZE;
+  const to = from + PAGE_SIZE - 1;
+
+  // delete dialog
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<AdminOrderRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const handleLogout = async () => {
     await logout();
@@ -84,54 +109,68 @@ export default function AdminOrdersPage() {
     router.push('/');
   };
 
-  // Redirect non-admins (but do it inside an effect)
+  // redirect non-admins
   useEffect(() => {
-    if (user && !isAdmin) {
-      router.push('/admin');
-    }
+    if (user && !isAdmin) router.push('/admin');
   }, [user, isAdmin, router]);
 
-  // Load orders from Supabase
+  // reset to page 1 when search changes
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery]);
+
+  // fetch a page of orders (NO status filtering)
   useEffect(() => {
     if (!user || !isAdmin) return;
+
+    let cancelled = false;
 
     const load = async () => {
       try {
         setLoading(true);
 
-        // 1) Load base orders
-        const { data: ordersData, error: oErr } = await supabase
+        // Base query with count + stable ordering + pagination
+        let q = supabase
           .from('orders')
           .select(
-            'id, order_number, user_id, status, total, currency, created_at, address_snapshot'
+            'id, order_number, status, total, currency, created_at, address_snapshot',
+            { count: 'exact' }
           )
-          .order('created_at', { ascending: false });
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: false })
+          .range(from, to);
 
-        if (oErr) {
-          console.error('Admin orders: orders error', oErr);
-          toast.error('Failed to load orders');
-          setLoading(false);
-          return;
+        // NOTE:
+        // If your address_snapshot is a STRING column, server-side search using ->> won't work.
+        // So we keep server-side search to order_number only,
+        // and we do name/email filtering on client side below.
+        const s = searchQuery.trim();
+        if (s) {
+          q = q.ilike('order_number', `%${s}%`);
         }
+
+        const { data: ordersData, error: oErr, count } = await q;
+        if (oErr) throw oErr;
+
+        if (cancelled) return;
+
+        setTotalCount(count ?? 0);
 
         const rawOrders = ordersData || [];
         if (rawOrders.length === 0) {
           setOrders([]);
-          setLoading(false);
           return;
         }
 
         const orderIds = rawOrders.map((o: any) => o.id);
 
-        // 2) Load order_items for item count
+        // item count (current page only)
         const { data: itemsData, error: iErr } = await supabase
           .from('order_items')
           .select('order_id, quantity')
           .in('order_id', orderIds);
 
-        if (iErr) {
-          console.error('Admin orders: items error', iErr);
-        }
+        if (iErr) console.error('Admin orders: items error', iErr);
 
         const itemCountMap = new Map<string, number>();
         (itemsData || []).forEach((row: any) => {
@@ -140,51 +179,29 @@ export default function AdminOrdersPage() {
           itemCountMap.set(key, (itemCountMap.get(key) || 0) + qty);
         });
 
-        // 3) Load payments for latest payment method per order
+        // latest payment method (current page only)
         const { data: paymentsData, error: pErr } = await supabase
           .from('payments')
-          .select('order_id, method, provider_payment_id, created_at')
+          .select('order_id, method, created_at')
           .in('order_id', orderIds);
 
-        if (pErr) {
-          console.error('Admin orders: payments error', pErr);
-        }
+        if (pErr) console.error('Admin orders: payments error', pErr);
 
-        const paymentMap = new Map<
-          string,
-          {
-            method: string;
-            provider_payment_id: string | null;
-            created_at: string;
-          }
-        >();
+        const paymentMap = new Map<string, { method: string; created_at: string }>();
         (paymentsData || []).forEach((p: any) => {
           const key = p.order_id;
           const existing = paymentMap.get(key);
           if (!existing) {
-            paymentMap.set(key, {
-              method: p.method || '—',
-              provider_payment_id: p.provider_payment_id ?? null,
-              created_at: p.created_at,
-            });
-          } else {
-            if (
-              new Date(p.created_at).getTime() >
-              new Date(existing.created_at).getTime()
-            ) {
-              paymentMap.set(key, {
-                method: p.method || '—',
-                provider_payment_id: p.provider_payment_id ?? null,
-                created_at: p.created_at,
-              });
-            }
+            paymentMap.set(key, { method: p.method || '—', created_at: p.created_at });
+            return;
+          }
+          if (new Date(p.created_at).getTime() > new Date(existing.created_at).getTime()) {
+            paymentMap.set(key, { method: p.method || '—', created_at: p.created_at });
           }
         });
 
-        // 4) Build final rows
         const enriched: AdminOrderRow[] = rawOrders.map((o: any) => {
-          const snap = o.address_snapshot || {};
-          const payment = paymentMap.get(o.id);
+          const snap = safeParseSnapshot(o.address_snapshot);
 
           return {
             id: o.id,
@@ -193,91 +210,114 @@ export default function AdminOrdersPage() {
             total: Number(o.total || 0),
             currency: o.currency ?? 'INR',
             created_at: o.created_at,
-            customerName: snap.name || 'Guest',
-            customerEmail: snap.email || '—',
+            customerName: snap?.name || 'Guest',
+            customerEmail: snap?.email || '—',
             itemCount: itemCountMap.get(o.id) || 0,
-            paymentMethod: payment?.method || '—',
+            paymentMethod: paymentMap.get(o.id)?.method || '—',
           };
         });
 
         setOrders(enriched);
-      } catch (err) {
-        console.error('Admin orders: fatal load error', err);
-        toast.error('Failed to load orders');
+      } catch (err: any) {
+        console.error('Admin orders: load error', err);
+        toast.error(err?.message || 'Failed to load orders');
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
     load();
-  }, [user, isAdmin]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, isAdmin, from, to, searchQuery]);
+
+  // Client-side search for name/email/id (works even if address_snapshot is string)
+  const visibleOrders = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return orders;
+    return orders.filter((o) => {
+      const id = (o.order_number || o.id).toLowerCase();
+      const name = (o.customerName || '').toLowerCase();
+      const email = (o.customerEmail || '').toLowerCase();
+      return id.includes(q) || name.includes(q) || email.includes(q);
+    });
+  }, [orders, searchQuery]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'pending':
-      case 'pending_payment':
-      case 'created':
-        return 'outline';
-      case 'processing':
-      case 'paid':
-        return 'secondary';
-      case 'dispatched':
-      case 'shipped':
-      case 'delivered':
-        return 'default';
       case 'cancelled':
         return 'destructive';
-      case 'returned':
-        return 'outline';
+      case 'delivered':
+      case 'shipped':
+      case 'dispatched':
+        return 'default';
+      case 'paid':
+      case 'processing':
+        return 'secondary';
       default:
         return 'outline';
     }
   };
 
-  const filterOrdersByStatus = (status: string) => {
-    if (status === 'all') return orders;
-    return orders.filter((order) => order.status === status);
+  const exportOrders = () => toast.success('Exporting orders to CSV...');
+
+  const openDelete = (order: AdminOrderRow) => {
+    setDeleteTarget(order);
+    setDeleteOpen(true);
   };
 
-  const filteredOrders = useMemo(() => {
-    const statusFiltered = filterOrdersByStatus(activeTab);
-    return statusFiltered.filter((order) => {
-      const id = (order.order_number || order.id).toLowerCase();
-      const name = (order.customerName || '').toLowerCase();
-      const email = (order.customerEmail || '').toLowerCase();
-      const q = searchQuery.toLowerCase();
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
 
-      return id.includes(q) || name.includes(q) || email.includes(q);
-    });
-  }, [orders, activeTab, searchQuery]);
+    try {
+      setDeleting(true);
 
-  const stats = useMemo(() => {
-    return {
-      all: orders.length,
-      pending: orders.filter(
-        (o) =>
-          o.status === 'pending' ||
-          o.status === 'pending_payment' ||
-          o.status === 'created'
-      ).length,
-      processing: orders.filter(
-        (o) => o.status === 'processing' || o.status === 'paid'
-      ).length,
-      dispatched: orders.filter(
-        (o) => o.status === 'dispatched' || o.status === 'shipped'
-      ).length,
-      delivered: orders.filter((o) => o.status === 'delivered').length,
-      cancelled: orders.filter((o) => o.status === 'cancelled').length,
-      returned: orders.filter((o) => o.status === 'returned').length,
-    };
-  }, [orders]);
+      // delete children first (works without FK cascade)
+      const { error: itemsErr } = await supabase
+        .from('order_items')
+        .delete()
+        .eq('order_id', deleteTarget.id);
+      if (itemsErr) throw itemsErr;
 
-  const exportOrders = () => {
-    // Simple placeholder – can be replaced with real CSV export
-    toast.success('Exporting orders to CSV...');
+      const { error: payErr } = await supabase
+        .from('payments')
+        .delete()
+        .eq('order_id', deleteTarget.id);
+      if (payErr) throw payErr;
+
+      const { error: orderErr } = await supabase
+        .from('orders')
+        .delete()
+        .eq('id', deleteTarget.id);
+      if (orderErr) throw orderErr;
+
+      toast.success('Order deleted');
+      setDeleteOpen(false);
+      setDeleteTarget(null);
+
+      // update UI
+      setOrders((prev) => prev.filter((o) => o.id !== deleteTarget.id));
+      setTotalCount((c) => Math.max(0, c - 1));
+
+      // if we deleted the only row on this page, go back a page
+      if (orders.length === 1 && page > 1) setPage((p) => p - 1);
+    } catch (e: any) {
+      console.error('Delete order failed:', e);
+      toast.error(e?.message || 'Failed to delete order (check RLS/foreign keys)');
+    } finally {
+      setDeleting(false);
+    }
   };
 
-  // After all hooks: if not admin, render nothing (redirect handled above)
+  const showingText = useMemo(() => {
+    if (totalCount === 0) return 'Showing 0 orders';
+    const start = from + 1;
+    const end = Math.min(from + orders.length, totalCount);
+    return `Showing ${start}–${end} of ${totalCount}`;
+  }, [from, orders.length, totalCount]);
+
   if (!isAdmin) return null;
 
   return (
@@ -288,12 +328,10 @@ export default function AdminOrdersPage() {
             <Button variant="ghost" onClick={() => router.push('/admin')}>
               ← Back
             </Button>
-            <h1 className="text-2xl font-bold">Orders Management</h1>
+            <h1 className="text-2xl font-bold">Orders</h1>
           </div>
           <div className="flex items-center gap-4">
-            <span className="text-sm text-muted-foreground">
-              {user?.name}
-            </span>
+            <span className="text-sm text-muted-foreground">{user?.name}</span>
             <Button variant="outline" size="sm" onClick={handleLogout}>
               <LogOut className="mr-2 h-4 w-4" />
               Logout
@@ -303,180 +341,164 @@ export default function AdminOrdersPage() {
       </header>
 
       <div className="container mx-auto py-8">
-        <div className="mb-6 flex justify-between items-center">
+        <div className="mb-6 flex justify-between items-center gap-4">
           <div className="flex items-center gap-4 flex-1 max-w-md">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Search by order ID, customer name, or email..."
+                placeholder="Search by order no, customer name, email..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-10"
               />
             </div>
           </div>
-          <Button onClick={exportOrders} variant="outline">
-            <Download className="mr-2 h-4 w-4" />
-            Export CSV
-          </Button>
+
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-muted-foreground">{showingText}</span>
+            <Button onClick={exportOrders} variant="outline">
+              <Download className="mr-2 h-4 w-4" />
+              Export CSV
+            </Button>
+          </div>
         </div>
 
         <Card>
           <CardHeader>
-            <CardTitle>Orders Management</CardTitle>
-            <CardDescription>
-              View and manage customer orders by status
-            </CardDescription>
+            <CardTitle>All Orders</CardTitle>
+            <CardDescription>Paginated list (20 per page)</CardDescription>
           </CardHeader>
-          <CardContent>
-            <Tabs
-              value={activeTab}
-              onValueChange={setActiveTab}
-              className="w-full"
-            >
-              <TabsList className="grid grid-cols-7 w-full">
-                <TabsTrigger value="all">
-                  All
-                  <Badge variant="secondary" className="ml-2">
-                    {stats.all}
-                  </Badge>
-                </TabsTrigger>
-                <TabsTrigger value="pending">
-                  Pending
-                  <Badge variant="secondary" className="ml-2">
-                    {stats.pending}
-                  </Badge>
-                </TabsTrigger>
-                <TabsTrigger value="processing">
-                  Processing
-                  <Badge variant="secondary" className="ml-2">
-                    {stats.processing}
-                  </Badge>
-                </TabsTrigger>
-                <TabsTrigger value="dispatched">
-                  Dispatched
-                  <Badge variant="secondary" className="ml-2">
-                    {stats.dispatched}
-                  </Badge>
-                </TabsTrigger>
-                <TabsTrigger value="delivered">
-                  Delivered
-                  <Badge variant="secondary" className="ml-2">
-                    {stats.delivered}
-                  </Badge>
-                </TabsTrigger>
-                <TabsTrigger value="cancelled">
-                  Cancelled
-                  <Badge variant="secondary" className="ml-2">
-                    {stats.cancelled}
-                  </Badge>
-                </TabsTrigger>
-                <TabsTrigger value="returned">
-                  Returned
-                  <Badge variant="secondary" className="ml-2">
-                    {stats.returned}
-                  </Badge>
-                </TabsTrigger>
-              </TabsList>
 
-              <TabsContent value={activeTab}>
-                <div className="mt-6 rounded-md border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Order ID</TableHead>
-                        <TableHead>Customer</TableHead>
-                        <TableHead>Date</TableHead>
-                        <TableHead>Items</TableHead>
-                        <TableHead>Payment</TableHead>
-                        <TableHead>Total</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
+          <CardContent>
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Order ID</TableHead>
+                    <TableHead>Customer</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Items</TableHead>
+                    <TableHead>Payment</TableHead>
+                    <TableHead>Total</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+
+                <TableBody>
+                  {loading ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                        Loading orders…
+                      </TableCell>
+                    </TableRow>
+                  ) : visibleOrders.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                        No orders found
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    visibleOrders.map((order) => (
+                      <TableRow key={order.id}>
+                        <TableCell className="font-medium">
+                          {order.order_number || order.id}
+                        </TableCell>
+                        <TableCell>
+                          <div>
+                            <div className="font-medium">{order.customerName}</div>
+                            <div className="text-sm text-muted-foreground">{order.customerEmail}</div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {new Date(order.created_at).toLocaleDateString('en-IN')}
+                        </TableCell>
+                        <TableCell>{order.itemCount}</TableCell>
+                        <TableCell>{order.paymentMethod}</TableCell>
+                        <TableCell>{formatINR(order.total, order.currency)}</TableCell>
+                        <TableCell>
+                          <Badge variant={getStatusColor(order.status)}>{order.status}</Badge>
+                        </TableCell>
+                        <TableCell className="text-right space-x-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => router.push(`/admin/orders/${order.id}`)}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => router.push(`/admin/orders/${order.id}`)}
+                          >
+                            <FileText className="h-4 w-4" />
+                          </Button>
+
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => openDelete(order)}
+                            title="Delete order"
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </TableCell>
                       </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {loading ? (
-                        <TableRow>
-                          <TableCell
-                            colSpan={8}
-                            className="text-center py-8 text-muted-foreground"
-                          >
-                            Loading orders…
-                          </TableCell>
-                        </TableRow>
-                      ) : filteredOrders.length === 0 ? (
-                        <TableRow>
-                          <TableCell
-                            colSpan={8}
-                            className="text-center py-8 text-muted-foreground"
-                          >
-                            No orders found
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        filteredOrders.map((order) => (
-                          <TableRow key={order.id}>
-                            <TableCell className="font-medium">
-                              {order.order_number || order.id}
-                            </TableCell>
-                            <TableCell>
-                              <div>
-                                <div className="font-medium">
-                                  {order.customerName}
-                                </div>
-                                <div className="text-sm text-muted-foreground">
-                                  {order.customerEmail}
-                                </div>
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              {new Date(
-                                order.created_at
-                              ).toLocaleDateString('en-IN')}
-                            </TableCell>
-                            <TableCell>{order.itemCount}</TableCell>
-                            <TableCell>{order.paymentMethod}</TableCell>
-                            <TableCell>
-                              {formatINR(order.total, order.currency)}
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant={getStatusColor(order.status)}>
-                                {order.status}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-right space-x-1">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() =>
-                                  router.push(`/admin/orders/${order.id}`)
-                                }
-                              >
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() =>
-                                  router.push(
-                                    `/admin/orders/${order.id}/invoice`
-                                  )
-                                }
-                              >
-                                <FileText className="h-4 w-4" />
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-              </TabsContent>
-            </Tabs>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            {/* Pagination */}
+            <div className="mt-4 flex items-center justify-between">
+              <div className="text-sm text-muted-foreground">
+                Page {page} of {totalPages}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1 || loading}
+                >
+                  Prev
+                </Button>
+
+                <Button
+                  variant="outline"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages || loading}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </div>
+
+      {/* Delete confirm */}
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this order?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the order
+              {deleteTarget?.order_number ? ` (${deleteTarget.order_number})` : ''} and its related
+              items/payments. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} disabled={deleting}>
+              {deleting ? 'Deleting…' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

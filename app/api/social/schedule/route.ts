@@ -2,154 +2,127 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const ADMIN_OWNER_ID = process.env.FB_OWNER_ID || null; // optional fixed owner
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  { auth: { persistSession: false } }
+);
 
-function getAdminSupabase() {
-  if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
-    throw new Error("Supabase URL or SERVICE_ROLE_KEY env missing");
-  }
+const ADMIN_OWNER_ID =
+  process.env.FB_OWNER_ID || process.env.ADMIN_OWNER_ID || null;
 
-  return createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
-    auth: { persistSession: false },
-  });
-}
-
-// Resolve owner_id used for scheduled posts
-async function resolveOwnerId(supabase: ReturnType<typeof createClient>) {
-  if (ADMIN_OWNER_ID) return ADMIN_OWNER_ID;
-
-  const { data, error } = await supabase
-    .from("instagram_accounts")
-    .select("owner_id")
-    .eq("is_active", true)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error) {
-    console.error("resolveOwnerId instagram_accounts error:", error);
-    throw new Error("Failed to resolve owner_id from instagram_accounts");
-  }
-
-  if (!data?.owner_id) {
-    throw new Error(
-      "No owner_id found – set FB_OWNER_ID env or ensure instagram_accounts has a row"
-    );
-  }
-
-  return data.owner_id as string;
-}
-
-// 🔹 List scheduled posts (for UI)
-export async function GET(req: Request) {
-  try {
-    const supabase = getAdminSupabase();
-    const { searchParams } = new URL(req.url);
-    const platform = searchParams.get("platform"); // "instagram" | "facebook" | null
-
-    const ownerId = await resolveOwnerId(supabase);
-
-    let query = supabase
-      .from("social_scheduled_posts")
-      .select(
-        "id, platform, channel, scheduled_at, status, payload, last_error"
-      )
-      .eq("owner_id", ownerId)
-      .eq("status", "pending")
-      .order("scheduled_at", { ascending: true });
-
-    if (platform) {
-      query = query.eq("platform", platform);
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-      console.error("GET /api/social/schedule error:", error);
-      return NextResponse.json(
-        { error: "Failed to load scheduled posts" },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ data }, { status: 200 });
-  } catch (err: any) {
-    console.error("GET /api/social/schedule fatal:", err);
-    return NextResponse.json(
-      { error: "Failed to load scheduled posts", details: String(err?.message || err) },
-      { status: 500 }
-    );
-  }
-}
-
-// 🔹 Create a scheduled post
 export async function POST(req: Request) {
   try {
-    const supabase = getAdminSupabase();
     const body = await req.json();
 
-    const {
-      platform,      // "facebook" | "instagram"
-      channel,       // optional: "feed" | "reels" | ...
-      scheduled_at,  // ISO string
-      payload,       // { caption, media_url, media_type, ... }
-    } = body;
+    let {
+      channel,
+      platform,
+      caption,
+      message,
+      media_url,
+      media_type,
+      scheduled_at,
+    } = body as {
+      channel?: string;
+      platform?: string;
+      caption?: string;
+      message?: string;
+      media_url?: string;
+      media_type?: string;
+      scheduled_at?: string;
+    };
 
-    if (!platform) {
+    // Map channel/platform -> your enum column
+    const effectivePlatform = (platform || channel || "instagram") as string;
+
+    if (!media_url || !media_type || !scheduled_at) {
       return NextResponse.json(
-        { error: "platform is required (e.g. 'facebook' or 'instagram')" },
+        { error: "media_url, media_type and scheduled_at are required" },
         { status: 400 }
       );
     }
 
-    if (!scheduled_at) {
+    if (effectivePlatform !== "instagram") {
       return NextResponse.json(
-        { error: "scheduled_at is required" },
+        { error: "Only instagram scheduling is supported for now" },
         { status: 400 }
       );
     }
 
-    const scheduleDate = new Date(scheduled_at);
-    if (Number.isNaN(scheduleDate.getTime())) {
+    const scheduledDate = new Date(scheduled_at);
+    if (Number.isNaN(scheduledDate.getTime())) {
       return NextResponse.json(
-        { error: "scheduled_at must be a valid date/time" },
+        { error: "Invalid scheduled_at format" },
         { status: 400 }
       );
     }
 
-    const scheduledIso = scheduleDate.toISOString();
-    const payloadJson = payload && typeof payload === "object" ? payload : {};
+    // ---- resolve owner_id (required, NOT NULL) ----
+    let ownerId = ADMIN_OWNER_ID as string | null;
 
-    const ownerId = await resolveOwnerId(supabase);
+    if (!ownerId) {
+      const { data: account, error: accErr } = await supabaseAdmin
+        .from("instagram_accounts")
+        .select("owner_id")
+        .eq("is_active", true)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-    const { data, error } = await supabase
+      if (accErr) {
+        console.error("resolve owner_id error", accErr);
+        throw new Error("Failed to determine owner_id");
+      }
+      if (!account) {
+        throw new Error(
+          "No active instagram_accounts row found to determine owner_id"
+        );
+      }
+      ownerId = account.owner_id;
+    }
+
+    // Use your message column as the caption text
+    const finalMessage =
+      (message && message.trim()) ||
+      (caption && caption.trim()) ||
+      null;
+
+    const payload = {
+      caption: caption ?? finalMessage ?? "",
+      media_url,
+      media_type,
+    };
+
+    const { data, error } = await supabaseAdmin
       .from("social_scheduled_posts")
       .insert({
         owner_id: ownerId,
-        platform,
-        channel: channel || null,
-        scheduled_at: scheduledIso,
+        platform: effectivePlatform, // must be 'instagram' | 'facebook'
+        channel: effectivePlatform,  // optional helper
+        message: finalMessage,
+        media_url,
+        media_type,
+        scheduled_at: scheduledDate.toISOString(),
         status: "pending",
-        payload: payloadJson,
+        payload,
       })
-      .select("id, platform, channel, scheduled_at, status, payload")
+      .select("*")
       .single();
 
     if (error) {
-      console.error("INSERT social_scheduled_posts error:", error);
+      console.error("social_scheduled_posts insert error", error);
       return NextResponse.json(
-        { error: "Failed to save scheduled post", details: error.message },
+        { error: "Failed to insert scheduled post" },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({ data }, { status: 200 });
+    return NextResponse.json({ data });
   } catch (err: any) {
-    console.error("POST /api/social/schedule fatal:", err);
+    console.error("/api/social/schedule error", err);
     return NextResponse.json(
-      { error: "Failed to schedule post", details: String(err?.message || err) },
+      { error: err.message || "Failed to schedule post" },
       { status: 500 }
     );
   }
