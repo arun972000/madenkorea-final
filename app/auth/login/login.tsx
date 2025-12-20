@@ -109,34 +109,29 @@ const loginWithProvider = async (provider: "google" | "facebook") => {
 
     const redirectParam = redirect || "/account";
 
-    // ✅ save as fallback (some setups lose query params)
-    localStorage.setItem("postLoginRedirect", redirectParam);
-
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
+        // This must match what you added in Supabase URL config:
+        // e.g. http://localhost:3000/auth/callback
         redirectTo: `${window.location.origin}/auth/callback?redirect=${encodeURIComponent(
-          redirectParam
+          redirectParam,
         )}`,
       },
     });
-
-console.log("[LOGIN] current url:", window.location.href);
-console.log("[LOGIN] redirect param:", redirectParam);
-console.log("[LOGIN] redirectTo:", `${window.location.origin}/auth/callback?redirect=${encodeURIComponent(redirectParam)}`);
-
 
     if (error) {
       toast.error(error.message || `Could not start ${provider} sign in`);
       setOauthLoading(null);
     }
-  } catch (err) {
+    // On success, browser will be redirected away, so code after this usually
+    // won't run. We don't call attachAfterAuth here – that's done in /auth/callback.
+  } catch (err: any) {
     console.error(err);
     toast.error("Something went wrong, please try again.");
     setOauthLoading(null);
   }
 };
-
 
 const handleGoogleLogin = () => loginWithProvider("google");
 const handleFacebookLogin = () => loginWithProvider("facebook");

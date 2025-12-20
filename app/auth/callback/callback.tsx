@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useEffect, useState } from "react";
@@ -10,20 +11,19 @@ import { toast } from "sonner";
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-  { auth: { persistSession: true, autoRefreshToken: true } }
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+    },
+  }
 );
-
-function safeRedirect(v: string | null) {
-  // prevent open-redirects
-  if (!v) return null;
-  return v.startsWith("/") ? v : null;
-}
 
 export default function AuthCallbackPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const redirect = searchParams.get("redirect") || "/account";
 
-  const redirectFromQuery = safeRedirect(searchParams.get("redirect"));
   const [checking, setChecking] = useState(true);
 
   const attachAfterAuth = async () => {
@@ -41,51 +41,29 @@ export default function AuthCallbackPage() {
   };
 
   useEffect(() => {
-    console.log("[CALLBACK] landed url:", window.location.href);
-console.log("[CALLBACK] search:", window.location.search);
-console.log("[CALLBACK] redirect param:", searchParams.get("redirect"));
-console.log("[CALLBACK] code exists:", !!searchParams.get("code"));
-
     (async () => {
       try {
-        // ✅ PKCE: exchange code -> session
-        const code = searchParams.get("code");
-        if (code) {
-          const { error } = await supabase.auth.exchangeCodeForSession(code);
-          if (error) throw error;
-        }
+        const { data, error } = await supabase.auth.getSession();
 
-        // fallback redirect from localStorage if query param missing
-        const redirectFromStorage =
-          safeRedirect(localStorage.getItem("postLoginRedirect")) || null;
+        if (error) throw error;
 
-        const finalRedirect =
-          redirectFromQuery || redirectFromStorage || "/account";
-
-        // cleanup
-        localStorage.removeItem("postLoginRedirect");
-
-        const { data } = await supabase.auth.getSession();
         if (!data.session) {
           toast.error("Could not complete sign in. Please try again.");
-          router.replace(
-            `/auth/login?redirect=${encodeURIComponent(finalRedirect)}`
-          );
+          router.replace(`/auth/login?redirect=${encodeURIComponent(redirect)}`);
           return;
         }
 
         await attachAfterAuth();
-        router.replace(finalRedirect);
+        router.replace(redirect);
       } catch (err) {
         console.error(err);
         toast.error("Something went wrong while signing you in.");
-        const fallback = redirectFromQuery || "/account";
-        router.replace(`/auth/login?redirect=${encodeURIComponent(fallback)}`);
+        router.replace(`/auth/login?redirect=${encodeURIComponent(redirect)}`);
       } finally {
         setChecking(false);
       }
     })();
-  }, [router, searchParams, redirectFromQuery]);
+  }, [router, redirect]);
 
   return (
     <CustomerLayout>
