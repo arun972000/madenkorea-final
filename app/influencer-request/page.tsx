@@ -111,12 +111,6 @@ export default function PartnerProgramPage() {
     };
   }, [authState, supabase]);
 
-
-
-useEffect(() => {
-      window.location.reload(); // ✅ one-time hard reload
-}, []);
-
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setMsg(null);
