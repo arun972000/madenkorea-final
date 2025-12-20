@@ -111,31 +111,73 @@ export default function PartnerProgramPage() {
     };
   }, [authState, supabase]);
 
+const AUTH_RELOAD_KEY = "partner_program_auth_reload_once_v1";
 
-  const RELOAD_KEY = "partner_program_reload_once";
 
 useEffect(() => {
-  const k = `${RELOAD_KEY}:${typeof window !== "undefined" ? window.location.pathname : ""}`;
+  let mounted = true;
 
-  try {
-    const alreadyReloaded = sessionStorage.getItem(k) === "1";
+  (async () => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
 
-    if (!alreadyReloaded) {
-      sessionStorage.setItem(k, "1");
-      window.location.reload(); // ✅ one-time hard reload
+    if (!mounted) return;
+
+    // ✅ If session missing, do ONE hard reload (fixes "needs refresh after OAuth")
+    if (!session?.access_token) {
+      try {
+        const already = sessionStorage.getItem(AUTH_RELOAD_KEY) === "1";
+        if (!already) {
+          sessionStorage.setItem(AUTH_RELOAD_KEY, "1");
+          window.location.reload();
+          return;
+        }
+      } catch {
+        // ignore storage errors
+      }
+
+      // After one reload, if still no session -> show your existing anon UI
+      setAuthState("anon");
       return;
     }
-  } catch {
-    // ignore sessionStorage errors
-  }
 
-  // ✅ allow reload again on next visit (when navigating away and back)
-  return () => {
+    // ✅ session exists -> clear flag so next time it can reload again if needed
     try {
-      sessionStorage.removeItem(k);
+      sessionStorage.removeItem(AUTH_RELOAD_KEY);
     } catch {}
+
+    // bridge (best effort)
+    fetch("/api/auth/attach", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        access_token: session.access_token,
+        refresh_token: session.refresh_token,
+      }),
+    }).catch(() => {});
+
+    setAuthState("authed");
+  })();
+
+  const {
+    data: { subscription },
+  } = supabase.auth.onAuthStateChange((_e, s) => {
+    setAuthState(s ? "authed" : "anon");
+    if (s) {
+      try {
+        sessionStorage.removeItem(AUTH_RELOAD_KEY);
+      } catch {}
+    }
+  });
+
+  return () => {
+    mounted = false;
+    subscription.unsubscribe();
   };
-}, []);
+}, [supabase]);
+
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
