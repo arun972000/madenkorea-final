@@ -1,12 +1,6 @@
 "use client";
 
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import {
@@ -31,20 +25,15 @@ type Status = "none" | "pending" | "rejected" | "influencer" | "admin";
 
 export default function PartnerProgramPage() {
   const router = useRouter();
-
-  // ✅ stable client instance (prevents weird hydration/event timing issues)
-  const supabase = useMemo(() => createClientComponentClient(), []);
+  const supabase = createClientComponentClient();
 
   // auth + status
   const [authState, setAuthState] = useState<"checking" | "authed" | "anon">(
     "checking"
   );
-  const [authMsg, setAuthMsg] = useState<string | null>(null);
-
   const [status, setStatus] = useState<Status>("none");
   const [requestedAt, setRequestedAt] = useState<string | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
-
   const isApproved = status === "influencer" || status === "admin";
 
   // modal + form
@@ -55,181 +44,101 @@ export default function PartnerProgramPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  // prevent concurrent retry loops
-  const retryLock = useRef(false);
-
-  const safePath = (p: string | null) => {
-    if (!p) return null;
-    return p.startsWith("/") ? p : null;
-  };
-
-  // ✅ UI Gate strategy:
-  // Keep portal UI rendered always, but block with overlay until authed.
-  const showGate = authState !== "authed";
-
-  const retryAuth = useCallback(async () => {
-    if (retryLock.current) return;
-    retryLock.current = true;
-
-    try {
-      setAuthMsg(null);
-      setAuthState("checking");
-
-      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-      // If OAuth ever lands here with ?code=... (some setups do)
-      // finalize session and clean URL.
-      try {
-        const url = new URL(window.location.href);
-        const code = url.searchParams.get("code");
-        if (code) {
-          await supabase.auth.exchangeCodeForSession(code).catch(() => {});
-          url.searchParams.delete("code");
-          url.searchParams.delete("state");
-          window.history.replaceState({}, "", url.toString());
-        }
-      } catch {
-        // ignore
-      }
-
-      // Wait briefly for session to hydrate (this is what fixes "needs refresh")
-      for (let i = 0; i < 12; i++) {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-
-        if (session?.access_token) {
-          // bridge (best effort) -> server cookies
-          fetch("/api/auth/attach", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            credentials: "include",
-            body: JSON.stringify({
-              access_token: session.access_token,
-              refresh_token: session.refresh_token,
-            }),
-          }).catch(() => {});
-
-          setAuthState("authed");
-          return;
-        }
-
-        await sleep(150);
-      }
-
-      // Optional last resort if available in your version
-      try {
-        // @ts-ignore
-        if (typeof supabase.auth.refreshSession === "function") {
-          // @ts-ignore
-          const { data } = await supabase.auth.refreshSession();
-          if (data?.session?.access_token) {
-            setAuthState("authed");
-            return;
-          }
-        }
-      } catch {
-        // ignore
-      }
-
-      setAuthState("anon");
-      setAuthMsg(
-        "Session not detected yet. If you just logged in with Google/Facebook, click Retry."
-      );
-    } finally {
-      retryLock.current = false;
-    }
-  }, [supabase]);
-
-  // boot auth + subscribe
+  // Attach client session → server cookies, then load status
   useEffect(() => {
-    let alive = true;
-
+    let mounted = true;
     (async () => {
-      if (!alive) return;
-      await retryAuth();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!mounted) return;
+
+      if (!session?.access_token) {
+        // No redirect – just mark as anonymous
+        setAuthState("anon");
+        return;
+      }
+
+      // bridge (best effort)
+      fetch("/api/auth/attach", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
+        }),
+      }).catch(() => {});
+
+      setAuthState("authed");
     })();
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      // Keep it simple: event-based auth state flip.
-      // The retryAuth handles the "late session appears" case.
-      setAuthState(session ? "authed" : "anon");
+    } = supabase.auth.onAuthStateChange((_e, s) => {
+      setAuthState(s ? "authed" : "anon");
     });
+    return () => subscription.unsubscribe();
+  }, [supabase]);
 
-    // Helpful when user returns from OAuth in same tab (often fixes without refresh)
-    const onFocus = () => retryAuth();
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") retryAuth();
-    };
-
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVisibility);
-
-    return () => {
-      alive = false;
-      subscription.unsubscribe();
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, [supabase, retryAuth]);
-
-  // Load influencer status (only when authed)
   useEffect(() => {
-    if (authState !== "authed") {
-      setStatusLoading(false);
-      return;
-    }
-
+    if (authState !== "authed") return;
     let cancel = false;
-
     (async () => {
       setStatusLoading(true);
       setErr(null);
-
       const {
         data: { session },
       } = await supabase.auth.getSession();
-
-      if (!session?.access_token) {
-        if (!cancel) {
-          setStatusLoading(false);
-          setAuthState("anon");
-        }
-        return;
-      }
+      if (!session?.access_token) return;
 
       const res = await fetch(`/api/influencer/status?t=${Date.now()}`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
         cache: "no-store",
       });
-
       const j = await res.json().catch(() => ({}));
       if (cancel) return;
-
-      if (res.status === 401) {
-        setAuthState("anon");
-        setStatusLoading(false);
-        return;
-      }
 
       if (!res.ok) setErr(j?.error || "Failed to load status");
       else {
         setStatus((j?.status as Status) ?? "none");
         setRequestedAt(j?.requested_at ?? null);
       }
-
       setStatusLoading(false);
     })();
-
     return () => {
       cancel = true;
     };
   }, [authState, supabase]);
 
-  async function submit(e?: any) {
-    e?.preventDefault?.();
+
+  const RELOAD_KEY = "partner_program_reload_once";
+
+useEffect(() => {
+  const k = `${RELOAD_KEY}:${typeof window !== "undefined" ? window.location.pathname : ""}`;
+
+  try {
+    const alreadyReloaded = sessionStorage.getItem(k) === "1";
+
+    if (!alreadyReloaded) {
+      sessionStorage.setItem(k, "1");
+      window.location.reload(); // ✅ one-time hard reload
+      return;
+    }
+  } catch {
+    // ignore sessionStorage errors
+  }
+
+  // ✅ allow reload again on next visit (when navigating away and back)
+  return () => {
+    try {
+      sessionStorage.removeItem(k);
+    } catch {}
+  };
+}, []);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
     setMsg(null);
     setErr(null);
     setSubmitting(true);
@@ -237,8 +146,8 @@ export default function PartnerProgramPage() {
     const {
       data: { session },
     } = await supabase.auth.getSession();
-
     if (!session?.access_token) {
+      // No redirect – just show a message and keep user on this page
       setSubmitting(false);
       setAuthState("anon");
       setErr("Please log in to submit a partner request.");
@@ -255,7 +164,6 @@ export default function PartnerProgramPage() {
         credentials: "include",
         body: JSON.stringify({ handle, note, social: {} }),
       });
-
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j?.ok === false)
         setErr(j?.error || "Failed to submit. Please try again.");
@@ -274,69 +182,68 @@ export default function PartnerProgramPage() {
     }
   }
 
-  return (
-    <>
-      <Header />
+  // While checking auth, just show a lightweight loading state
+  if (authState === "checking") {
+    return (
+      <>
+        <Header />
+        <div className="min-h-[60vh] grid place-items-center">
+          <div className="text-sm text-neutral-600">Loading…</div>
+        </div>
+        <Footer />
+      </>
+    );
+  }
 
-      {/* ✅ AUTH GATE OVERLAY (UI fix – no portal functionality changed) */}
-      {showGate && (
-        <div className="fixed inset-0 z-[100] grid place-items-center bg-black/40 backdrop-blur-sm px-4">
-          <div className="w-full max-w-md rounded-3xl border bg-white p-6 shadow-2xl text-center">
+  // If NOT logged in: show login CTA and hide portal / request UI
+  if (authState === "anon") {
+    return (
+      <>
+        <Header />
+        <main className="min-h-[70vh] bg-[radial-gradient(60%_60%_at_20%_-10%,#FDECEC,transparent),radial-gradient(40%_50%_at_100%_0%,#E8F7FF,transparent)] flex items-center justify-center px-4">
+          <div className="w-full max-w-md rounded-3xl border bg-white/80 p-6 shadow-xl backdrop-blur text-center">
             <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-rose-50 text-rose-700">
               <Sparkles className="h-5 w-5" />
             </div>
-
-            <h2 className="text-lg font-semibold">
-              {authState === "checking"
-                ? "Finishing sign in…"
-                : "Sign in required"}
-            </h2>
-
+            <h1 className="text-xl font-semibold">
+              Sign in to access the partner program
+            </h1>
             <p className="mt-2 text-sm text-neutral-600">
-              {authState === "checking"
-                ? "Please wait a moment. If you just logged in with Google/Facebook, we’re syncing your session."
-                : "You need an account to view your partner portal and submit an application."}
+              You need an account to view your partner portal and submit an
+              application.
             </p>
-
-            {authMsg && <p className="mt-2 text-xs text-rose-700">{authMsg}</p>}
-
             <div className="mt-5 flex flex-col gap-2">
               <button
-                onClick={() => {
-                  // store as fallback for systems where redirect params are flaky
-                  localStorage.setItem(
-                    "postLoginRedirect",
-                    "/influencer-request"
-                  );
-                  router.push("/auth/login?redirect=/influencer-request");
-                }}
+                onClick={() =>
+                  router.push("/auth/login?redirect=/influencer-request")
+                }
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-black px-5 py-3 text-sm font-semibold text-white hover:bg-black/90"
               >
                 Login to access <ArrowRight className="h-4 w-4" />
               </button>
-
-              <button
-                onClick={retryAuth}
-                className="rounded-xl border border-neutral-300 px-5 py-3 text-sm font-semibold hover:bg-white"
-              >
-                I already logged in — Retry
-              </button>
-
               <button
                 onClick={() => router.push("/")}
-                className="text-xs text-neutral-500 hover:underline"
+                className="rounded-xl border border-neutral-300 px-5 py-3 text-sm font-semibold hover:bg-white"
               >
                 Back to home
               </button>
             </div>
           </div>
-        </div>
-      )}
+        </main>
+        <Footer />
+      </>
+    );
+  }
 
-      {/* ========== PORTAL UI (unchanged) ========== */}
+  // ========== LOGGED-IN VIEW (unchanged portal / request UI) ==========
+  return (
+    <>
+      <Header />
+
       <div className="min-h-screen bg-[radial-gradient(60%_60%_at_20%_-10%,#FDECEC,transparent),radial-gradient(40%_50%_at_100%_0%,#E8F7FF,transparent)] text-neutral-900">
         {/* ============ HERO — Consumer Innovations banner ============ */}
         <section className="relative isolate">
+          {/* Soft skincare-inspired image with airy gradient */}
           <div
             className="absolute inset-0 -z-10 bg-cover bg-center"
             style={{
@@ -350,6 +257,9 @@ export default function PartnerProgramPage() {
           <div className="mx-auto max-w-6xl px-4 py-14 sm:py-16">
             <div className="rounded-3xl border border-white/60 bg-white/70 p-6 shadow-2xl backdrop-blur">
               <div className="flex items-start gap-4">
+                {/* <div className="rounded-2xl bg-white/70 p-2 text-rose-700">
+                  <Sparkles className="h-6 w-6" />
+                </div> */}
                 <div className="flex-1">
                   <p className="inline-flex items-center gap-2 rounded-full bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700">
                     Made in Korea • Global codes • Consumer innovations
@@ -371,7 +281,8 @@ export default function PartnerProgramPage() {
                         onClick={() => router.push("/influencer")}
                         className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 text-sm font-semibold text-white hover:bg-emerald-400"
                       >
-                        Visit partner portal <ArrowRight className="h-4 w-4" />
+                        Visit partner portal{" "}
+                        <ArrowRight className="h-4 w-4" />
                       </button>
                     ) : status === "pending" ? (
                       <span className="inline-flex items-center justify-center rounded-xl bg-amber-300/90 px-4 py-3 text-sm font-semibold text-amber-900">
@@ -382,7 +293,8 @@ export default function PartnerProgramPage() {
                         onClick={() => setOpen(true)}
                         className="inline-flex items-center justify-center gap-2 rounded-xl bg-black px-5 py-3 text-sm font-semibold text-white hover:bg-black/90"
                       >
-                        Become a partner <ArrowRight className="h-4 w-4" />
+                        Become a partner{" "}
+                        <ArrowRight className="h-4 w-4" />
                       </button>
                     )}
 
@@ -430,6 +342,8 @@ export default function PartnerProgramPage() {
           <div className="absolute inset-0 bg-gradient-to-b from-white to-transparent [mask-image:radial-gradient(120%_50%_at_50%_-10%,black,transparent)]" />
         </div>
 
+        {/* ============ SECTIONS (feel-good, minimal) ============ */}
+
         {/* A. Steps */}
         <section className="mx-auto max-w-6xl px-4">
           <h2 className="mb-3 text-lg font-semibold">How it works</h2>
@@ -471,8 +385,10 @@ export default function PartnerProgramPage() {
               </div>
               <p className="mt-1 text-xs">
                 Submitted on{" "}
-                {requestedAt ? new Date(requestedAt).toLocaleString() : "—"}. We
-                usually review within 1–2 business days.
+                {requestedAt
+                  ? new Date(requestedAt).toLocaleString()
+                  : "—"}
+                . We usually review within 1–2 business days.
               </p>
               <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[11px]">
                 <span className="rounded-lg bg-white/70 px-2 py-1">
@@ -587,7 +503,9 @@ export default function PartnerProgramPage() {
                 We’ll review and email you.
               </p>
 
-              <label className="mb-1 block text-xs font-medium">Name</label>
+              <label className="mb-1 block text-xs font-medium">
+                Name
+              </label>
               <input
                 className="mb-3 w-full rounded-lg border px-3 py-2 text-sm"
                 placeholder="e.g. glowwithjin"
@@ -643,7 +561,10 @@ export default function PartnerProgramPage() {
                     Open as modal
                   </button>
                 </div>
-                <form onSubmit={submit} className="mt-4 grid grid-cols-1 gap-4">
+                <form
+                  onSubmit={submit}
+                  className="mt-4 grid grid-cols-1 gap-4"
+                >
                   <div>
                     <label className="mb-1 block text-xs font-medium">
                       Name
@@ -692,7 +613,6 @@ export default function PartnerProgramPage() {
           </div>
         )}
       </div>
-
       <Footer />
     </>
   );
@@ -711,7 +631,9 @@ function Chip({
   return (
     <div className="rounded-2xl border border-white/60 bg-white/70 p-3">
       <div className="flex items-center gap-2">
-        <div className="rounded-md bg-white p-1.5 text-rose-700">{icon}</div>
+        <div className="rounded-md bg-white p-1.5 text-rose-700">
+          {icon}
+        </div>
         <div className="text-sm font-semibold">{title}</div>
       </div>
       <p className="mt-1 text-xs text-neutral-700">{desc}</p>
@@ -790,7 +712,9 @@ function FaqItem({ q, a }: { q: string; a: string }) {
   return (
     <details
       open={open}
-      onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
+      onToggle={(e) =>
+        setOpen((e.target as HTMLDetailsElement).open)
+      }
       className="group border-b last:border-none"
     >
       <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm">
