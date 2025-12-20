@@ -1,9 +1,8 @@
-// app/admin/invoices/new/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import {supabase} from "@/lib/supabaseClient";
+import { useParams, useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
 
 import {
   Card,
@@ -30,8 +29,8 @@ type InvoiceCompany = {
   display_name: string;
 };
 
-type InvoiceItem = {
-  id: string; // local id for React key
+type InvoiceItemForm = {
+  localId: string; // React key only
   description: string;
   hsn_sac: string;
   quantity: number;
@@ -40,18 +39,9 @@ type InvoiceItem = {
   tax_percent: number;
 };
 
-const DEFAULT_NOTES = `Reseller Disclaimer
-We are resellers and are not responsible for product usage or handling guidance. For detailed information on how to use the product safely and effectively, please contact the product manufacturer directly.
-
-Return Policy
-• Returns are accepted within 5 days from the date of delivery.
-• Returns are only accepted for products with damaged packaging or expired items.
-• Used products or items with broken or tampered seals are not eligible for return.`;
-
-
-function createEmptyItem(): InvoiceItem {
+function createEmptyItem(): InvoiceItemForm {
   return {
-    id: crypto.randomUUID(),
+    localId: crypto.randomUUID(),
     description: "",
     hsn_sac: "",
     quantity: 1,
@@ -61,20 +51,18 @@ function createEmptyItem(): InvoiceItem {
   };
 }
 
-export default function NewInvoicePage() {
+export default function EditInvoicePage() {
+  const params = useParams();
   const router = useRouter();
+  const invoiceId = params?.id as string;
 
   const [companies, setCompanies] = useState<InvoiceCompany[]>([]);
-  const [loadingCompanies, setLoadingCompanies] = useState<boolean>(false);
-  const [taxLabel, setTaxLabel] = useState<string>("GST (CGST + SGST)");
-
-
-
-  const [saving, setSaving] = useState<boolean>(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // --- Invoice form state ---
+  // form state
   const [companyId, setCompanyId] = useState<string>("");
   const [invoiceNumber, setInvoiceNumber] = useState<string>("");
   const [invoiceDate, setInvoiceDate] = useState<string>("");
@@ -82,41 +70,94 @@ export default function NewInvoicePage() {
 
   const [customerName, setCustomerName] = useState<string>("");
   const [billingAddress, setBillingAddress] = useState<string>("");
-  const [phone, setPhone] = useState<string>("");          // ✅ mobile
+  const [phone, setPhone] = useState<string>("");
   const [email, setEmail] = useState<string>("");
   const [gstNumber, setGstNumber] = useState<string>("");
   const [panNumber, setPanNumber] = useState<string>("");
-  const [notes, setNotes] = useState<string>(DEFAULT_NOTES);
+  const [notes, setNotes] = useState<string>("");
 
-  const [items, setItems] = useState<InvoiceItem[]>([createEmptyItem()]);
+  const [items, setItems] = useState<InvoiceItemForm[]>([createEmptyItem()]);
 
-  // --- Load companies from DB ---
+  // Load companies + invoice
   useEffect(() => {
-    const loadCompanies = async () => {
-      setLoadingCompanies(true);
-      const { data, error } = await supabase
+    if (!invoiceId) return;
+
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+
+      // companies
+      const { data: companyData, error: companyErr } = await supabase
         .from("invoice_companies")
         .select("id, key, display_name")
         .order("display_name", { ascending: true });
 
-      if (error) {
-        console.error("Error loading invoice_companies", error);
-      } else if (data) {
-        setCompanies(data as InvoiceCompany[]);
-        if (data.length > 0) {
-          setCompanyId(data[0].id); // default select first company
-        }
+      if (companyErr) {
+        console.error(companyErr);
+        setError(companyErr.message || "Failed to load companies");
+        setLoading(false);
+        return;
       }
-      setLoadingCompanies(false);
+
+      setCompanies(companyData as InvoiceCompany[]);
+
+      // invoice + items
+      const { data, error: invErr } = await supabase
+        .from("invoices")
+        .select(
+          `
+          *,
+          invoice_items:invoice_items(*)
+        `
+        )
+        .eq("id", invoiceId)
+        .single();
+
+      if (invErr) {
+        console.error(invErr);
+        setError(invErr.message || "Failed to load invoice");
+        setLoading(false);
+        return;
+      }
+
+      const inv: any = data;
+
+      setCompanyId(inv.company_id);
+      setInvoiceNumber(inv.invoice_number || "");
+      setInvoiceDate(inv.invoice_date || "");
+      setDueDate(inv.due_date || "");
+      setCustomerName(inv.customer_name || "");
+      setBillingAddress(inv.billing_address || "");
+      setPhone(inv.phone || "");
+      setEmail(inv.email || "");
+      setGstNumber(inv.gst_number || "");
+      setPanNumber(inv.pan_number || "");
+      setNotes(
+        inv.notes ||
+          ""
+      );
+
+      const loadedItems: InvoiceItemForm[] =
+        (inv.invoice_items || [])
+          .sort((a: any, b: any) => a.position - b.position)
+          .map((it: any) => ({
+            localId: crypto.randomUUID(),
+            description: it.description || "",
+            hsn_sac: it.hsn_sac || "",
+            quantity: Number(it.quantity) || 0,
+            unit_price: Number(it.unit_price) || 0,
+            discount: Number(it.discount) || 0,
+            tax_percent: Number(it.tax_percent) || 0,
+          })) || [];
+
+      setItems(loadedItems.length ? loadedItems : [createEmptyItem()]);
+      setLoading(false);
     };
 
-    loadCompanies();
+    load();
+  }, [invoiceId]);
 
-    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-    setInvoiceDate(today);
-  }, []);
-
-  // --- Totals calculation ---
+  // totals
   const { subtotal, taxAmount, totalAmount } = useMemo(() => {
     let sub = 0;
     let tax = 0;
@@ -135,27 +176,24 @@ export default function NewInvoicePage() {
     };
   }, [items]);
 
-  // --- Item operations ---
-  const updateItem = (id: string, patch: Partial<InvoiceItem>) => {
+  const updateItem = (localId: string, patch: Partial<InvoiceItemForm>) => {
     setItems((prev) =>
-      prev.map((it) => (it.id === id ? { ...it, ...patch } : it))
+      prev.map((it) => (it.localId === localId ? { ...it, ...patch } : it))
     );
   };
 
   const addItem = () => setItems((prev) => [...prev, createEmptyItem()]);
 
-  const removeItem = (id: string) => {
+  const removeItem = (localId: string) => {
     setItems((prev) =>
-      prev.length <= 1 ? prev : prev.filter((it) => it.id !== id)
+      prev.length <= 1 ? prev : prev.filter((it) => it.localId !== localId)
     );
   };
 
-  // --- Form submit: save invoice + items ---
   const handleSave = async () => {
     setError(null);
     setSuccessMessage(null);
 
-    // Basic validation
     if (!companyId) {
       setError("Please select the invoice company.");
       return;
@@ -184,43 +222,47 @@ export default function NewInvoicePage() {
     setSaving(true);
 
     try {
-      // 1) Insert into invoices
-      const { data: invoiceData, error: invoiceError } = await supabase
+      // 1) update invoice header
+      const { error: upErr } = await supabase
         .from("invoices")
-        .insert([
-          {
-            company_id: companyId,
-            invoice_number: invoiceNumber,
-            invoice_date: invoiceDate || null,
-            due_date: dueDate || null,
+        .update({
+          company_id: companyId,
+          invoice_number: invoiceNumber,
+          invoice_date: invoiceDate || null,
+          due_date: dueDate || null,
 
-            customer_name: customerName,
-            billing_address: billingAddress || null,
-            phone: phone || null,                 // ✅ save mobile
-            email: email || null,
-            contact_person: null,
-            gst_number: gstNumber || null,
-            pan_number: panNumber || null,
+          customer_name: customerName,
+          billing_address: billingAddress || null,
+          phone: phone || null,
+          email: email || null,
+          contact_person: null,
+          gst_number: gstNumber || null,
+          pan_number: panNumber || null,
 
-            subtotal,
-            tax_amount: taxAmount,
-            total_amount: totalAmount,
+          subtotal,
+          tax_amount: taxAmount,
+          total_amount: totalAmount,
 
-            notes: notes || null,
-            // status uses DB default
-          },
-        ])
-        .select("*")
-        .single();
+          notes: notes || null,
+        })
+        .eq("id", invoiceId);
 
-      if (invoiceError || !invoiceData) {
-        console.error(invoiceError);
-        throw new Error(invoiceError?.message || "Failed to create invoice");
+      if (upErr) {
+        console.error(upErr);
+        throw new Error(upErr.message || "Failed to update invoice");
       }
 
-      const invoiceId = invoiceData.id as string;
+      // 2) replace items
+      const { error: delErr } = await supabase
+        .from("invoice_items")
+        .delete()
+        .eq("invoice_id", invoiceId);
 
-      // 2) Insert line items
+      if (delErr) {
+        console.error(delErr);
+        throw new Error(delErr.message || "Failed to replace invoice items");
+      }
+
       const itemsToInsert = items
         .filter((it) => it.description.trim())
         .map((it, index) => {
@@ -244,35 +286,56 @@ export default function NewInvoicePage() {
         });
 
       if (itemsToInsert.length > 0) {
-        const { error: itemsError } = await supabase
+        const { error: insErr } = await supabase
           .from("invoice_items")
           .insert(itemsToInsert);
 
-        if (itemsError) {
-          console.error(itemsError);
-          throw new Error(
-            itemsError.message || "Failed to create invoice items"
-          );
+        if (insErr) {
+          console.error(insErr);
+          throw new Error(insErr.message || "Failed to insert invoice items");
         }
       }
 
-      setSuccessMessage("Invoice saved successfully.");
+      setSuccessMessage("Invoice updated successfully.");
       router.push(`/admin/invoices/${invoiceId}`);
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Something went wrong.");
+    } catch (e: any) {
+      console.error(e);
+      setError(e.message || "Something went wrong while saving.");
     } finally {
       setSaving(false);
     }
   };
 
+  if (loading) {
+    return (
+      <div className="container mx-auto max-w-6xl py-6">
+        <div className="text-sm text-slate-600">Loading invoice...</div>
+      </div>
+    );
+  }
+
   return (
     <div className="container mx-auto max-w-6xl py-6 space-y-6">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-lg font-semibold">Edit Invoice</h2>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => router.push(`/admin/invoices/${invoiceId}`)}
+          >
+            Cancel
+          </Button>
+          <Button onClick={handleSave} disabled={saving}>
+            {saving ? "Saving..." : "Save Changes"}
+          </Button>
+        </div>
+      </div>
+
       <Card>
         <CardHeader>
-          <CardTitle>Create Invoice</CardTitle>
+          <CardTitle>Invoice #{invoiceNumber || "—"}</CardTitle>
           <CardDescription>
-            Generate an invoice for a customer and save it to the system.
+            Update invoice details, items and totals.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -292,7 +355,6 @@ export default function NewInvoicePage() {
             <div className="space-y-1">
               <Label>Invoice Company</Label>
               <Select
-                disabled={loadingCompanies}
                 value={companyId || undefined}
                 onValueChange={setCompanyId}
               >
@@ -314,7 +376,6 @@ export default function NewInvoicePage() {
               <Input
                 value={invoiceNumber}
                 onChange={(e) => setInvoiceNumber(e.target.value)}
-                placeholder="e.g. MK/2025/0001"
               />
             </div>
 
@@ -322,7 +383,7 @@ export default function NewInvoicePage() {
               <Label>Invoice Date</Label>
               <Input
                 type="date"
-                value={invoiceDate}
+                value={invoiceDate || ""}
                 onChange={(e) => setInvoiceDate(e.target.value)}
               />
             </div>
@@ -331,7 +392,7 @@ export default function NewInvoicePage() {
               <Label>Due Date</Label>
               <Input
                 type="date"
-                value={dueDate}
+                value={dueDate || ""}
                 onChange={(e) => setDueDate(e.target.value)}
               />
             </div>
@@ -346,7 +407,6 @@ export default function NewInvoicePage() {
                 <Input
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
-                  placeholder="Customer / Company Name"
                 />
               </div>
 
@@ -356,7 +416,6 @@ export default function NewInvoicePage() {
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Customer email (internal use)"
                 />
               </div>
 
@@ -365,7 +424,6 @@ export default function NewInvoicePage() {
                 <Input
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
-                  placeholder="Customer mobile number"
                 />
               </div>
 
@@ -374,7 +432,6 @@ export default function NewInvoicePage() {
                 <Input
                   value={gstNumber}
                   onChange={(e) => setGstNumber(e.target.value)}
-                  placeholder="Customer GST Number"
                 />
               </div>
 
@@ -383,7 +440,6 @@ export default function NewInvoicePage() {
                 <Input
                   value={panNumber}
                   onChange={(e) => setPanNumber(e.target.value)}
-                  placeholder="Customer PAN Number"
                 />
               </div>
             </div>
@@ -391,15 +447,14 @@ export default function NewInvoicePage() {
             <div className="mt-3 space-y-1">
               <Label>Billing Address</Label>
               <Textarea
+                rows={3}
                 value={billingAddress}
                 onChange={(e) => setBillingAddress(e.target.value)}
-                placeholder="Full billing address"
-                rows={3}
               />
             </div>
           </div>
 
-          {/* Line items */}
+          {/* Items */}
           <div className="border-t pt-4">
             <div className="mb-2 flex items-center justify-between">
               <h3 className="text-base font-semibold">Invoice Items</h3>
@@ -435,25 +490,25 @@ export default function NewInvoicePage() {
                     const lineTotal = lineSubtotal + lineTax;
 
                     return (
-                      <tr key={item.id} className="border-t">
+                      <tr key={item.localId} className="border-t">
                         <td className="px-2 py-1 align-top">
                           <Input
                             value={item.description}
                             onChange={(e) =>
-                              updateItem(item.id, {
+                              updateItem(item.localId, {
                                 description: e.target.value,
                               })
                             }
-                            placeholder="Item / service description"
                           />
                         </td>
                         <td className="px-2 py-1 align-top">
                           <Input
                             value={item.hsn_sac}
                             onChange={(e) =>
-                              updateItem(item.id, { hsn_sac: e.target.value })
+                              updateItem(item.localId, {
+                                hsn_sac: e.target.value,
+                              })
                             }
-                            placeholder="HSN / SAC"
                           />
                         </td>
                         <td className="px-2 py-1 align-top">
@@ -462,7 +517,7 @@ export default function NewInvoicePage() {
                             min={0}
                             value={item.quantity.toString()}
                             onChange={(e) =>
-                              updateItem(item.id, {
+                              updateItem(item.localId, {
                                 quantity: Number(e.target.value) || 0,
                               })
                             }
@@ -475,7 +530,7 @@ export default function NewInvoicePage() {
                             step="0.01"
                             value={item.unit_price.toString()}
                             onChange={(e) =>
-                              updateItem(item.id, {
+                              updateItem(item.localId, {
                                 unit_price: Number(e.target.value) || 0,
                               })
                             }
@@ -488,7 +543,7 @@ export default function NewInvoicePage() {
                             step="0.01"
                             value={item.discount.toString()}
                             onChange={(e) =>
-                              updateItem(item.id, {
+                              updateItem(item.localId, {
                                 discount: Number(e.target.value) || 0,
                               })
                             }
@@ -501,13 +556,13 @@ export default function NewInvoicePage() {
                             step="0.01"
                             value={item.tax_percent.toString()}
                             onChange={(e) =>
-                              updateItem(item.id, {
+                              updateItem(item.localId, {
                                 tax_percent: Number(e.target.value) || 0,
                               })
                             }
                           />
                         </td>
-                        <td className="px-2 py-1 align-top text-right align-middle">
+                        <td className="px-2 py-1 align-top text-right">
                           {lineTotal.toFixed(2)}
                         </td>
                         <td className="px-2 py-1 text-center align-middle">
@@ -515,8 +570,8 @@ export default function NewInvoicePage() {
                             type="button"
                             variant="ghost"
                             size="sm"
-                            onClick={() => removeItem(item.id)}
                             disabled={items.length <= 1}
+                            onClick={() => removeItem(item.localId)}
                           >
                             Remove
                           </Button>
@@ -545,32 +600,16 @@ export default function NewInvoicePage() {
             </div>
           </div>
 
-          {/* Notes (internal or extra info) */}
+          {/* Notes */}
           <div className="border-t pt-4">
             <div className="space-y-1">
-              <Label>Notes / Internal Reference</Label>
+              <Label>Notes</Label>
               <Textarea
-                rows={3}
+                rows={5}
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="Any internal notes for this invoice"
               />
             </div>
-          </div>
-
-          {/* Actions */}
-          <div className="flex items-center justify-end gap-3 border-t pt-4">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => window.print()}
-            >
-              Print (Current View)
-            </Button>
-
-            <Button type="button" onClick={handleSave} disabled={saving}>
-              {saving ? "Saving..." : "Save Invoice"}
-            </Button>
           </div>
         </CardContent>
       </Card>

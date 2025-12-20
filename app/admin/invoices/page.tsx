@@ -1,9 +1,9 @@
 // app/admin/invoices/page.tsx
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import supabase from '@/lib/supabaseClient';
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
 
 import {
   Card,
@@ -11,10 +11,9 @@ import {
   CardTitle,
   CardDescription,
   CardContent,
-} from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 type InvoiceRow = {
   id: string;
@@ -22,7 +21,6 @@ type InvoiceRow = {
   invoice_date: string | null;
   customer_name: string;
   total_amount: number;
-  status: string;
   invoice_companies: {
     display_name: string;
   } | null;
@@ -33,7 +31,9 @@ export default function InvoicesListPage() {
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState<string>('');
+  const [search, setSearch] = useState<string>("");
+
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     const loadInvoices = async () => {
@@ -41,7 +41,7 @@ export default function InvoicesListPage() {
       setError(null);
 
       const { data, error } = await supabase
-        .from('invoices')
+        .from("invoices")
         .select(
           `
           id,
@@ -49,15 +49,14 @@ export default function InvoicesListPage() {
           invoice_date,
           customer_name,
           total_amount,
-          status,
           invoice_companies:invoice_companies(display_name)
         `
         )
-        .order('created_at', { ascending: false });
+        .order("created_at", { ascending: false });
 
       if (error) {
         console.error(error);
-        setError(error.message || 'Failed to load invoices');
+        setError(error.message || "Failed to load invoices");
       } else if (data) {
         setInvoices(data as InvoiceRow[]);
       }
@@ -78,19 +77,27 @@ export default function InvoicesListPage() {
     );
   });
 
-  const renderStatusBadge = (status: string) => {
-    const s = status.toUpperCase();
-    let className = 'border-slate-500 text-slate-700';
-    if (s === 'DRAFT') className = 'border-yellow-500 text-yellow-700';
-    if (s === 'SENT') className = 'border-blue-500 text-blue-700';
-    if (s === 'PAID') className = 'border-green-600 text-green-700';
-    if (s === 'CANCELLED') className = 'border-red-600 text-red-700';
+  const handleDelete = async (id: string) => {
+    const ok = window.confirm("Delete this invoice permanently?");
+    if (!ok) return;
 
-    return (
-      <Badge variant="outline" className={className}>
-        {s}
-      </Badge>
-    );
+    setError(null);
+    setDeletingId(id);
+
+    // assumes invoice_items has FK invoice_id ON DELETE CASCADE
+    const { error } = await supabase
+      .from("invoices")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      console.error(error);
+      setError(error.message || "Failed to delete invoice");
+    } else {
+      setInvoices((prev) => prev.filter((inv) => inv.id !== id));
+    }
+
+    setDeletingId(null);
   };
 
   return (
@@ -99,9 +106,11 @@ export default function InvoicesListPage() {
         <CardHeader className="flex flex-row items-center justify-between gap-4">
           <div>
             <CardTitle>Invoices</CardTitle>
-            <CardDescription>View and manage all generated invoices.</CardDescription>
+            <CardDescription>
+              View, edit and print Amazon-style invoices generated in the system.
+            </CardDescription>
           </div>
-          <Button onClick={() => router.push('/admin/invoices/new')}>
+          <Button onClick={() => router.push("/admin/invoices/new")}>
             + New Invoice
           </Button>
         </CardHeader>
@@ -143,7 +152,6 @@ export default function InvoicesListPage() {
                     <th className="px-3 py-2 text-left">Company</th>
                     <th className="px-3 py-2 text-left">Customer</th>
                     <th className="px-3 py-2 text-right">Total</th>
-                    <th className="px-3 py-2 text-center">Status</th>
                     <th className="px-3 py-2 text-center">Actions</th>
                   </tr>
                 </thead>
@@ -151,7 +159,7 @@ export default function InvoicesListPage() {
                   {filtered.map((inv) => {
                     const dateLabel = inv.invoice_date
                       ? new Date(inv.invoice_date).toLocaleDateString()
-                      : '-';
+                      : "-";
 
                     return (
                       <tr key={inv.id} className="border-t">
@@ -160,7 +168,7 @@ export default function InvoicesListPage() {
                         </td>
                         <td className="px-3 py-2 align-middle">{dateLabel}</td>
                         <td className="px-3 py-2 align-middle">
-                          {inv.invoice_companies?.display_name || '-'}
+                          {inv.invoice_companies?.display_name || "-"}
                         </td>
                         <td className="px-3 py-2 align-middle">
                           {inv.customer_name}
@@ -169,18 +177,34 @@ export default function InvoicesListPage() {
                           {inv.total_amount?.toFixed(2)}
                         </td>
                         <td className="px-3 py-2 align-middle text-center">
-                          {renderStatusBadge(inv.status)}
-                        </td>
-                        <td className="px-3 py-2 align-middle text-center">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() =>
-                              router.push(`/admin/invoices/${inv.id}`)
-                            }
-                          >
-                            View / Print
-                          </Button>
+                          <div className="flex items-center justify-center gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                router.push(`/admin/invoices/${inv.id}`)
+                              }
+                            >
+                              View
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                router.push(`/admin/invoices/${inv.id}/edit`)
+                              }
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              disabled={deletingId === inv.id}
+                              onClick={() => handleDelete(inv.id)}
+                            >
+                              {deletingId === inv.id ? "Deleting..." : "Delete"}
+                            </Button>
+                          </div>
                         </td>
                       </tr>
                     );

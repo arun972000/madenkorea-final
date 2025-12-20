@@ -9,8 +9,22 @@
 }
 
 @media print {
-  .print:hidden { display: none !important; }
-  body { background: white; }
+  body {
+    background: white;
+  }
+
+  /* Hide nav/sidebar/footer etc. if they have these classes */
+  .print:hidden {
+    display: none !important;
+  }
+
+  /* Remove box shadow / extra margin if needed */
+  .print\:shadow-none {
+    box-shadow: none !important;
+  }
+  .print\:border-none {
+    border: none !important;
+  }
 }
 
 @media (prefers-color-scheme: dark) {

@@ -7,8 +7,8 @@ const GRAPH_BASE = "https://graph.facebook.com/v21.0";
 // Poll the media container until it's ready (or fails)
 async function waitForContainerReady(creationId, igToken, options = {}) {
   const {
-    maxAttempts = 8,      // total polls
-    delayMs = 2000,       // 2 seconds between polls
+    maxAttempts = 8, // total polls
+    delayMs = 2000, // 2 seconds between polls
   } = options;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -55,9 +55,7 @@ async function waitForContainerReady(creationId, igToken, options = {}) {
   );
 }
 
-
 // Optional: lock records to a specific owner_id (admin)
-// If IG_OWNER_ID is not set, we fall back to ADMIN_OWNER_ID or a dummy UUID.
 const ADMIN_OWNER_ID = process.env.FB_OWNER_ID || null;
 
 // Env fallback (no DB needed)
@@ -68,7 +66,9 @@ const STATIC_IG_BUSINESS_ID =
 const STATIC_IG_ACCESS_TOKEN =
   process.env.IG_ACCESS_TOKEN || process.env.NEXT_PUBLIC_IG_ACCESS_TOKEN || "";
 const STATIC_IG_OWNER_ID =
-  process.env.IG_OWNER_ID || ADMIN_OWNER_ID || "00000000-0000-0000-0000-000000000000";
+  process.env.IG_OWNER_ID ||
+  ADMIN_OWNER_ID ||
+  "00000000-0000-0000-0000-000000000000";
 
 function getAdminSupabase() {
   if (
@@ -213,7 +213,10 @@ async function resolveInstagramBusinessIdAdmin(supabase) {
   } catch (e) {
     // Handle low-level fetch errors (ECONNRESET etc.)
     if (String(e?.message || e).includes("fetch failed")) {
-      console.error("Supabase network error in resolveInstagramBusinessIdAdmin:", e);
+      console.error(
+        "Supabase network error in resolveInstagramBusinessIdAdmin:",
+        e
+      );
       throw new Error(
         "Failed to connect to Supabase to load Instagram config. " +
           "Either set IG_BUSINESS_ACCOUNT_ID + IG_ACCESS_TOKEN env vars, " +
@@ -228,6 +231,7 @@ async function resolveInstagramBusinessIdAdmin(supabase) {
  * GET /api/instagram/media
  * - Fetch latest media from IG business account
  * - Cache into instagram_media_posts
+ * - Remove cache rows that no longer exist on Instagram (within this recent window)
  * - Return list from DB
  */
 export async function GET() {
@@ -248,7 +252,7 @@ export async function GET() {
       );
     }
 
-    // 2️⃣ Fetch media from IG Graph
+    // 1️⃣ Fetch media from IG Graph (latest 20)
     const mediaRes = await fetch(
       `${GRAPH_BASE}/${encodeURIComponent(
         igId
@@ -277,7 +281,7 @@ export async function GET() {
 
     const media = mediaJson?.data || [];
 
-    // 3️⃣ Upsert into DB
+    // 2️⃣ Upsert into DB
     if (media.length > 0) {
       const records = media.map((m) => ({
         owner_id: userId,
@@ -304,6 +308,50 @@ export async function GET() {
       if (upsertError) {
         console.error("Upsert error instagram_media_posts:", upsertError);
       }
+    }
+
+    // 3️⃣ Remove cache rows that are no longer on Instagram
+    //    (within this IG account + owner)
+    try {
+      const remoteIds = new Set(media.map((m) => m.id));
+
+      const { data: cachedRows, error: cacheError } = await supabase
+        .from("instagram_media_posts")
+        .select("ig_media_id")
+        .eq("owner_id", userId)
+        .eq("ig_business_account_id", igId);
+
+      if (cacheError) {
+        console.error(
+          "Error reading cached instagram_media_posts for cleanup:",
+          cacheError
+        );
+      } else if (cachedRows && cachedRows.length > 0) {
+        const toDelete = cachedRows
+          .map((row) => row.ig_media_id)
+          .filter((id) => id && !remoteIds.has(id));
+
+        if (toDelete.length > 0) {
+          const { error: deleteError } = await supabase
+            .from("instagram_media_posts")
+            .delete()
+            .eq("owner_id", userId)
+            .eq("ig_business_account_id", igId)
+            .in("ig_media_id", toDelete);
+
+          if (deleteError) {
+            console.error(
+              "Error deleting instagram_media_posts no longer on IG:",
+              deleteError
+            );
+          }
+        }
+      }
+    } catch (cleanupErr) {
+      console.error(
+        "Unexpected error while cleaning up stale instagram_media_posts:",
+        cleanupErr
+      );
     }
 
     // 4️⃣ Read from DB so structure is consistent
@@ -369,7 +417,7 @@ export async function POST(req) {
       );
     }
 
-    // 2️⃣ Step 1: create media container
+    // 1️⃣ Step 1: create media container
     const containerUrl = new URL(
       `${GRAPH_BASE}/${encodeURIComponent(igId)}/media`
     );
@@ -423,7 +471,7 @@ export async function POST(req) {
       );
     }
 
-    // 🔁 2.5: WAIT until container is ready
+    // 🔁 1.5: WAIT until container is ready
     try {
       await waitForContainerReady(creationId, igToken);
     } catch (waitErr) {
@@ -438,7 +486,7 @@ export async function POST(req) {
       );
     }
 
-    // 3️⃣ Step 2: publish the container
+    // 2️⃣ Step 2: publish the container
     const publishUrl = new URL(
       `${GRAPH_BASE}/${encodeURIComponent(igId)}/media_publish`
     );
@@ -479,7 +527,7 @@ export async function POST(req) {
       );
     }
 
-    // 4️⃣ Fetch full media details
+    // 3️⃣ Fetch full media details
     const detailsRes = await fetch(
       `${GRAPH_BASE}/${encodeURIComponent(
         igMediaId
@@ -507,7 +555,7 @@ export async function POST(req) {
       media_url: mediaUrl,
     };
 
-    // 5️⃣ Cache in DB
+    // 4️⃣ Cache in DB
     const record = {
       owner_id: userId,
       ig_business_account_id: igId,
@@ -547,7 +595,6 @@ export async function POST(req) {
     );
   }
 }
-
 
 /**
  * PATCH /api/instagram/media
@@ -589,16 +636,16 @@ export async function PATCH(req) {
       );
     }
 
-    // 🔹 IG Graph requires `comment_enabled` along with caption
+    // IG Graph requires POST for updates
     const url = new URL(`${GRAPH_BASE}/${encodeURIComponent(igMediaId)}`);
     const params = new URLSearchParams({
       caption,
-      comment_enabled: "true",      // 👈 add this line
+      comment_enabled: "true",
       access_token: igToken,
     });
 
     const fbRes = await fetch(url.toString(), {
-      method: "POST", // Graph uses POST for updates
+      method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: params.toString(),
     });
@@ -644,7 +691,6 @@ export async function PATCH(req) {
   }
 }
 
-
 /**
  * DELETE /api/instagram/media
  * - Delete from dashboard cache (not from real Instagram account)
@@ -676,6 +722,7 @@ export async function DELETE(req) {
       );
     }
 
+    // Dashboard-only delete: we do NOT remove from Instagram, only from cache
     const { error: deleteError } = await supabase
       .from("instagram_media_posts")
       .delete()
