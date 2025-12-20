@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import {
@@ -25,7 +25,7 @@ type Status = "none" | "pending" | "rejected" | "influencer" | "admin";
 
 export default function PartnerProgramPage() {
   const router = useRouter();
-  const supabase = createClientComponentClient();
+  const supabase = useMemo(() => createClientComponentClient(), []);
 
   // auth + status
   const [authState, setAuthState] = useState<"checking" | "authed" | "anon">(
@@ -45,21 +45,51 @@ export default function PartnerProgramPage() {
   const [err, setErr] = useState<string | null>(null);
 
   // Attach client session → server cookies, then load status
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      if (!mounted) return;
+useEffect(() => {
+  let alive = true;
+
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  const waitForSession = async () => {
+    // Wait up to ~2 seconds for session to appear (fixes “works after refresh”)
+    for (let i = 0; i < 12; i++) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) return session;
+      await sleep(150);
+    }
+    return null;
+  };
+
+  const cleanupUrl = () => {
+    // Remove auth params if present
+    const url = new URL(window.location.href);
+    url.searchParams.delete("code");
+    url.searchParams.delete("state");
+    window.history.replaceState({}, "", url.toString());
+  };
+
+  (async () => {
+    try {
+      setAuthState("checking");
+
+      // If OAuth ever returns here with ?code=..., finalize session
+      const code = new URL(window.location.href).searchParams.get("code");
+      if (code) {
+        await supabase.auth.exchangeCodeForSession(code).catch(() => {});
+        cleanupUrl();
+      }
+
+      // Main: wait for session to hydrate (prevents false "anon")
+      const session = await waitForSession();
+      if (!alive) return;
 
       if (!session?.access_token) {
-        // No redirect – just mark as anonymous
         setAuthState("anon");
         return;
       }
 
-      // bridge (best effort)
+      // Attach client session → server cookies (best effort)
+      // If you need server-side auth on API routes, keep this.
       fetch("/api/auth/attach", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -71,15 +101,24 @@ export default function PartnerProgramPage() {
       }).catch(() => {});
 
       setAuthState("authed");
-    })();
+    } catch {
+      if (!alive) return;
+      setAuthState("anon");
+    }
+  })();
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_e, s) => {
-      setAuthState(s ? "authed" : "anon");
-    });
-    return () => subscription.unsubscribe();
-  }, [supabase]);
+  // Also listen for auth changes (login/logout)
+  const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => {
+    if (!alive) return;
+    setAuthState(s ? "authed" : "anon");
+  });
+
+  return () => {
+    alive = false;
+    subscription.unsubscribe();
+  };
+}, [supabase]);
+
 
   useEffect(() => {
     if (authState !== "authed") return;
@@ -139,6 +178,13 @@ export default function PartnerProgramPage() {
         body: JSON.stringify({ handle, note, social: {} }),
       });
       const j = await res.json().catch(() => ({}));
+
+      if (res.status === 401) {
+  setAuthState("anon");
+  setStatusLoading(false);
+  return;
+}
+
       if (!res.ok || j?.ok === false)
         setErr(j?.error || "Failed to submit. Please try again.");
       else {
@@ -188,9 +234,10 @@ export default function PartnerProgramPage() {
             </p>
             <div className="mt-5 flex flex-col gap-2">
               <button
-                onClick={() =>
-                  router.push("/auth/login?redirect=/influencer-request")
-                }
+                onClick={() => {
+  localStorage.setItem("postLoginRedirect", "/influencer-request");
+  router.push("/auth/login");
+}}
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-black px-5 py-3 text-sm font-semibold text-white hover:bg-black/90"
               >
                 Login to access <ArrowRight className="h-4 w-4" />
