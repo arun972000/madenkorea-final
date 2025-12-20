@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import {
@@ -25,7 +25,7 @@ type Status = "none" | "pending" | "rejected" | "influencer" | "admin";
 
 export default function PartnerProgramPage() {
   const router = useRouter();
-  const supabase = useMemo(() => createClientComponentClient(), []);
+  const supabase = createClientComponentClient();
 
   // auth + status
   const [authState, setAuthState] = useState<"checking" | "authed" | "anon">(
@@ -44,94 +44,75 @@ export default function PartnerProgramPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  const RELOAD_ONCE_KEY = "influencer_request_reload_once_v1";
-
+  // ✅ NEW: show a helpful reload hint only in "already logged in but seeing anon" cases
+  const [loginHint, setLoginHint] = useState<string | null>(null);
 
   // Attach client session → server cookies, then load status
-useEffect(() => {
-  let mounted = true;
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!mounted) return;
 
-  // helper: only reload in the "token exists but getSession() is null" case
-  const shouldReloadToFixLateSession = () => {
-    try {
-      // already reloaded once on this tab/session
-      if (sessionStorage.getItem(RELOAD_ONCE_KEY) === "1") return false;
-
-      // if oauth returned here with code/state (sometimes)
-      const href = window.location.href;
-      const u = new URL(href);
-      if (u.searchParams.get("code") || u.searchParams.get("state")) return true;
-
-      // Supabase usually stores session in localStorage as sb-*-auth-token
-      const hasAuthTokenKey = Object.keys(localStorage).some((k) =>
-        k.includes("-auth-token")
-      );
-      return hasAuthTokenKey;
-    } catch {
-      return false;
-    }
-  };
-
-  (async () => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!mounted) return;
-
-    if (!session?.access_token) {
-      // ✅ reload ONCE only if we suspect session exists but is not hydrated yet
-      if (shouldReloadToFixLateSession()) {
-        try {
-          sessionStorage.setItem(RELOAD_ONCE_KEY, "1");
-        } catch {}
-        window.location.reload();
+      if (!session?.access_token) {
+        // No redirect – just mark as anonymous
+        setAuthState("anon");
         return;
       }
 
-      // otherwise it's a genuine anon user
-      setAuthState("anon");
+      // bridge (best effort)
+      fetch("/api/auth/attach", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
+        }),
+      }).catch(() => {});
+
+      setAuthState("authed");
+    })();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_e, s) => {
+      setAuthState(s ? "authed" : "anon");
+    });
+    return () => subscription.unsubscribe();
+  }, [supabase]);
+
+  // ✅ NEW: compute reload hint (only when anon)
+  useEffect(() => {
+    if (authState !== "anon") {
+      setLoginHint(null);
       return;
     }
 
-    // ✅ got session -> clear reload flag
     try {
-      sessionStorage.removeItem(RELOAD_ONCE_KEY);
-    } catch {}
+      const u = new URL(window.location.href);
+      const hasOAuthParams = !!(
+        u.searchParams.get("code") || u.searchParams.get("state")
+      );
 
-    // bridge (best effort)
-    fetch("/api/auth/attach", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({
-        access_token: session.access_token,
-        refresh_token: session.refresh_token,
-      }),
-    }).catch(() => {});
+      // Supabase usually stores session in localStorage under a "*-auth-token" key
+      const hasSupabaseToken = Object.keys(localStorage).some((k) =>
+        k.includes("-auth-token")
+      );
 
-    setAuthState("authed");
-  })();
-
-  const {
-    data: { subscription },
-  } = supabase.auth.onAuthStateChange((_e, s) => {
-    if (s) {
-      try {
-        sessionStorage.removeItem(RELOAD_ONCE_KEY);
-      } catch {}
-      setAuthState("authed");
-    } else {
-      setAuthState("anon");
+      if (hasOAuthParams || hasSupabaseToken) {
+        setLoginHint(
+          "If you already logged in with Google/Facebook and still see this screen, please reload this page once and open this page again."
+        );
+      } else {
+        setLoginHint(null);
+      }
+    } catch {
+      setLoginHint(null);
     }
-  });
-
-  return () => {
-    mounted = false;
-    subscription.unsubscribe();
-  };
-}, [supabase]);
-
+  }, [authState]);
 
   useEffect(() => {
     if (authState !== "authed") return;
@@ -238,6 +219,31 @@ useEffect(() => {
               You need an account to view your partner portal and submit an
               application.
             </p>
+
+            {/* ✅ NEW: reload feedback for “already logged in but still anon” */}
+            {loginHint && (
+              <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-left">
+                <div className="text-xs font-semibold text-amber-900">
+                  Quick fix
+                </div>
+                <p className="mt-1 text-xs text-amber-900">{loginHint}</p>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    onClick={() => window.location.reload()}
+                    className="inline-flex items-center justify-center rounded-xl bg-black px-4 py-2 text-xs font-semibold text-white hover:bg-black/90"
+                  >
+                    Reload now
+                  </button>
+                  <button
+                    onClick={() => router.push("/influencer-request")}
+                    className="inline-flex items-center justify-center rounded-xl border border-neutral-300 bg-white px-4 py-2 text-xs font-semibold hover:bg-neutral-50"
+                  >
+                    Open again
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="mt-5 flex flex-col gap-2">
               <button
                 onClick={() =>
@@ -283,9 +289,6 @@ useEffect(() => {
           <div className="mx-auto max-w-6xl px-4 py-14 sm:py-16">
             <div className="rounded-3xl border border-white/60 bg-white/70 p-6 shadow-2xl backdrop-blur">
               <div className="flex items-start gap-4">
-                {/* <div className="rounded-2xl bg-white/70 p-2 text-rose-700">
-                  <Sparkles className="h-6 w-6" />
-                </div> */}
                 <div className="flex-1">
                   <p className="inline-flex items-center gap-2 rounded-full bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700">
                     Made in Korea • Global codes • Consumer innovations
@@ -307,8 +310,7 @@ useEffect(() => {
                         onClick={() => router.push("/influencer")}
                         className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 text-sm font-semibold text-white hover:bg-emerald-400"
                       >
-                        Visit partner portal{" "}
-                        <ArrowRight className="h-4 w-4" />
+                        Visit partner portal <ArrowRight className="h-4 w-4" />
                       </button>
                     ) : status === "pending" ? (
                       <span className="inline-flex items-center justify-center rounded-xl bg-amber-300/90 px-4 py-3 text-sm font-semibold text-amber-900">
@@ -319,8 +321,7 @@ useEffect(() => {
                         onClick={() => setOpen(true)}
                         className="inline-flex items-center justify-center gap-2 rounded-xl bg-black px-5 py-3 text-sm font-semibold text-white hover:bg-black/90"
                       >
-                        Become a partner{" "}
-                        <ArrowRight className="h-4 w-4" />
+                        Become a partner <ArrowRight className="h-4 w-4" />
                       </button>
                     )}
 
@@ -368,8 +369,6 @@ useEffect(() => {
           <div className="absolute inset-0 bg-gradient-to-b from-white to-transparent [mask-image:radial-gradient(120%_50%_at_50%_-10%,black,transparent)]" />
         </div>
 
-        {/* ============ SECTIONS (feel-good, minimal) ============ */}
-
         {/* A. Steps */}
         <section className="mx-auto max-w-6xl px-4">
           <h2 className="mb-3 text-lg font-semibold">How it works</h2>
@@ -411,10 +410,8 @@ useEffect(() => {
               </div>
               <p className="mt-1 text-xs">
                 Submitted on{" "}
-                {requestedAt
-                  ? new Date(requestedAt).toLocaleString()
-                  : "—"}
-                . We usually review within 1–2 business days.
+                {requestedAt ? new Date(requestedAt).toLocaleString() : "—"}. We
+                usually review within 1–2 business days.
               </p>
               <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[11px]">
                 <span className="rounded-lg bg-white/70 px-2 py-1">
@@ -529,9 +526,7 @@ useEffect(() => {
                 We’ll review and email you.
               </p>
 
-              <label className="mb-1 block text-xs font-medium">
-                Name
-              </label>
+              <label className="mb-1 block text-xs font-medium">Name</label>
               <input
                 className="mb-3 w-full rounded-lg border px-3 py-2 text-sm"
                 placeholder="e.g. glowwithjin"
@@ -587,14 +582,9 @@ useEffect(() => {
                     Open as modal
                   </button>
                 </div>
-                <form
-                  onSubmit={submit}
-                  className="mt-4 grid grid-cols-1 gap-4"
-                >
+                <form onSubmit={submit} className="mt-4 grid grid-cols-1 gap-4">
                   <div>
-                    <label className="mb-1 block text-xs font-medium">
-                      Name
-                    </label>
+                    <label className="mb-1 block text-xs font-medium">Name</label>
                     <input
                       className="w-full rounded-lg border px-3 py-2 text-sm"
                       value={handle}
@@ -603,9 +593,7 @@ useEffect(() => {
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-medium">
-                      Note
-                    </label>
+                    <label className="mb-1 block text-xs font-medium">Note</label>
                     <textarea
                       rows={4}
                       className="w-full rounded-lg border px-3 py-2 text-sm"
@@ -657,9 +645,7 @@ function Chip({
   return (
     <div className="rounded-2xl border border-white/60 bg-white/70 p-3">
       <div className="flex items-center gap-2">
-        <div className="rounded-md bg-white p-1.5 text-rose-700">
-          {icon}
-        </div>
+        <div className="rounded-md bg-white p-1.5 text-rose-700">{icon}</div>
         <div className="text-sm font-semibold">{title}</div>
       </div>
       <p className="mt-1 text-xs text-neutral-700">{desc}</p>
@@ -738,9 +724,7 @@ function FaqItem({ q, a }: { q: string; a: string }) {
   return (
     <details
       open={open}
-      onToggle={(e) =>
-        setOpen((e.target as HTMLDetailsElement).open)
-      }
+      onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
       className="group border-b last:border-none"
     >
       <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm">
