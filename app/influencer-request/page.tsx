@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import {
@@ -25,7 +25,7 @@ type Status = "none" | "pending" | "rejected" | "influencer" | "admin";
 
 export default function PartnerProgramPage() {
   const router = useRouter();
-  const supabase = createClientComponentClient();
+  const supabase = useMemo(() => createClientComponentClient(), []);
 
   // auth + status
   const [authState, setAuthState] = useState<"checking" | "authed" | "anon">(
@@ -44,42 +44,94 @@ export default function PartnerProgramPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  // Attach client session → server cookies, then load status
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      if (!mounted) return;
+  const RELOAD_ONCE_KEY = "influencer_request_reload_once_v1";
 
-      if (!session?.access_token) {
-        // No redirect – just mark as anonymous
-        setAuthState("anon");
+
+  // Attach client session → server cookies, then load status
+useEffect(() => {
+  let mounted = true;
+
+  // helper: only reload in the "token exists but getSession() is null" case
+  const shouldReloadToFixLateSession = () => {
+    try {
+      // already reloaded once on this tab/session
+      if (sessionStorage.getItem(RELOAD_ONCE_KEY) === "1") return false;
+
+      // if oauth returned here with code/state (sometimes)
+      const href = window.location.href;
+      const u = new URL(href);
+      if (u.searchParams.get("code") || u.searchParams.get("state")) return true;
+
+      // Supabase usually stores session in localStorage as sb-*-auth-token
+      const hasAuthTokenKey = Object.keys(localStorage).some((k) =>
+        k.includes("-auth-token")
+      );
+      return hasAuthTokenKey;
+    } catch {
+      return false;
+    }
+  };
+
+  (async () => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!mounted) return;
+
+    if (!session?.access_token) {
+      // ✅ reload ONCE only if we suspect session exists but is not hydrated yet
+      if (shouldReloadToFixLateSession()) {
+        try {
+          sessionStorage.setItem(RELOAD_ONCE_KEY, "1");
+        } catch {}
+        window.location.reload();
         return;
       }
 
-      // bridge (best effort)
-      fetch("/api/auth/attach", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          access_token: session.access_token,
-          refresh_token: session.refresh_token,
-        }),
-      }).catch(() => {});
+      // otherwise it's a genuine anon user
+      setAuthState("anon");
+      return;
+    }
 
+    // ✅ got session -> clear reload flag
+    try {
+      sessionStorage.removeItem(RELOAD_ONCE_KEY);
+    } catch {}
+
+    // bridge (best effort)
+    fetch("/api/auth/attach", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        access_token: session.access_token,
+        refresh_token: session.refresh_token,
+      }),
+    }).catch(() => {});
+
+    setAuthState("authed");
+  })();
+
+  const {
+    data: { subscription },
+  } = supabase.auth.onAuthStateChange((_e, s) => {
+    if (s) {
+      try {
+        sessionStorage.removeItem(RELOAD_ONCE_KEY);
+      } catch {}
       setAuthState("authed");
-    })();
+    } else {
+      setAuthState("anon");
+    }
+  });
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_e, s) => {
-      setAuthState(s ? "authed" : "anon");
-    });
-    return () => subscription.unsubscribe();
-  }, [supabase]);
+  return () => {
+    mounted = false;
+    subscription.unsubscribe();
+  };
+}, [supabase]);
+
 
   useEffect(() => {
     if (authState !== "authed") return;
