@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { createClient } from "@supabase/supabase-js";
 import {
   ArrowRight,
-  Sparkles,
   Gift,
   LineChart,
   ShieldCheck,
@@ -18,21 +17,25 @@ import {
   HelpCircle,
   ChevronDown,
 } from "lucide-react";
+
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
+import { useAuth } from "@/lib/contexts/AuthContext";
 
 type Status = "none" | "pending" | "rejected" | "influencer" | "admin";
 
+// ✅ Same pattern as your /auth/login and /account pages (persist session in localStorage)
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  { auth: { persistSession: true, autoRefreshToken: true } }
+);
+
 export default function PartnerProgramPage() {
   const router = useRouter();
+  const { isAuthenticated } = useAuth();
 
-  // ✅ IMPORTANT: stable supabase client (helps avoid weird behavior on mobile)
-  const supabase = useMemo(() => createClientComponentClient(), []);
-
-  // auth + status
-  const [authState, setAuthState] = useState<"checking" | "authed" | "anon">(
-    "checking"
-  );
+  // status
   const [status, setStatus] = useState<Status>("none");
   const [requestedAt, setRequestedAt] = useState<string | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
@@ -46,135 +49,85 @@ export default function PartnerProgramPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  // ✅ Helpful hint for cases where OAuth succeeded but session appears late (common on mobile)
-  const [loginHint, setLoginHint] = useState<string | null>(null);
-
-  const isInAppBrowser = useMemo(() => {
-    try {
-      if (typeof navigator === "undefined") return false;
-      return /(FBAN|FBAV|Instagram|Line|LinkedInApp|Twitter|wv)/i.test(
-        navigator.userAgent
-      );
-    } catch {
-      return false;
-    }
-  }, []);
-
-  // ✅ AUTH: Poll session for a short time before deciding "anon" (mobile-friendly)
+  // ✅ 1) Gate the page exactly like /account (NO anon UI here)
   useEffect(() => {
-    let mounted = true;
+    if (!isAuthenticated) {
+      router.replace("/auth/login?redirect=/influencer-request");
+    }
+  }, [isAuthenticated, router]);
 
-    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  // ✅ 2) Attach browser session to server cookies ONCE (same idea as /auth/login + /auth/callback)
+  const attachedOnce = useRef(false);
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    if (attachedOnce.current) return;
+    attachedOnce.current = true;
 
     (async () => {
-      setAuthState("checking");
+      const { data: s } = await supabase.auth.getSession();
+      const at = s?.session?.access_token;
+      const rt = s?.session?.refresh_token;
+      if (!at || !rt) return;
 
-      // try immediately
-      let session = (await supabase.auth.getSession()).data.session;
-
-      // ✅ wait up to ~3 seconds (12 * 250ms) for session to hydrate (mobile often needs this)
-      for (let i = 0; i < 12 && !session?.access_token; i++) {
-        await sleep(250);
-        if (!mounted) return;
-        session = (await supabase.auth.getSession()).data.session;
-      }
-
-      if (!mounted) return;
-
-      if (!session?.access_token) {
-        setAuthState("anon");
-        return;
-      }
-
-      // bridge (best effort)
       fetch("/api/auth/attach", {
         method: "POST",
         headers: { "content-type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({
-          access_token: session.access_token,
-          refresh_token: session.refresh_token,
-        }),
+        body: JSON.stringify({ access_token: at, refresh_token: rt }),
       }).catch(() => {});
-
-      setAuthState("authed");
     })();
+  }, [isAuthenticated]);
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_e, s) => {
-      if (!mounted) return;
-      setAuthState(s ? "authed" : "anon");
-    });
-
-    return () => {
-      mounted = false;
-      subscription.unsubscribe();
-    };
-  }, [supabase]);
-
-  // ✅ Compute “reload suggestion” only when anon (and it looks like OAuth already happened)
-  useEffect(() => {
-    if (authState !== "anon") {
-      setLoginHint(null);
-      return;
+  // helper: get token or kick to login (no reload)
+  const getAccessTokenOrRedirect = async () => {
+    const { data } = await supabase.auth.getSession();
+    const at = data.session?.access_token;
+    if (!at) {
+      router.replace("/auth/login?redirect=/influencer-request");
+      return null;
     }
+    return at;
+  };
 
-    try {
-      const u = new URL(window.location.href);
-      const hasOAuthParams = !!(u.searchParams.get("code") || u.searchParams.get("state"));
-
-      // Supabase usually stores session in localStorage under a "*-auth-token" key
-      const hasSupabaseToken = Object.keys(localStorage).some((k) =>
-        k.includes("-auth-token")
-      );
-
-      if (hasOAuthParams || hasSupabaseToken) {
-        setLoginHint(
-          "If you already logged in with Google/Facebook and still see this screen, please reload this page once."
-        );
-      } else {
-        setLoginHint(null);
-      }
-    } catch {
-      setLoginHint(null);
-    }
-  }, [authState]);
-
-  // Load influencer status once authed
+  // ✅ 3) Load influencer status once logged in
   useEffect(() => {
-    if (authState !== "authed") return;
-    let cancel = false;
+    if (!isAuthenticated) return;
 
+    let cancelled = false;
     (async () => {
       setStatusLoading(true);
       setErr(null);
 
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      if (!session?.access_token) return;
+      const at = await getAccessTokenOrRedirect();
+      if (!at) return;
 
-      const res = await fetch(`/api/influencer/status?t=${Date.now()}`, {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        cache: "no-store",
-      });
+      try {
+        const res = await fetch(`/api/influencer/status?t=${Date.now()}`, {
+          headers: { Authorization: `Bearer ${at}` },
+          cache: "no-store",
+        });
 
-      const j = await res.json().catch(() => ({}));
-      if (cancel) return;
+        const j = await res.json().catch(() => ({}));
+        if (cancelled) return;
 
-      if (!res.ok) setErr(j?.error || "Failed to load status");
-      else {
-        setStatus((j?.status as Status) ?? "none");
-        setRequestedAt(j?.requested_at ?? null);
+        if (!res.ok) {
+          setErr(j?.error || "Failed to load status");
+        } else {
+          setStatus((j?.status as Status) ?? "none");
+          setRequestedAt(j?.requested_at ?? null);
+        }
+      } catch (e: any) {
+        if (!cancelled) setErr(e?.message || "Network error. Please try again.");
+      } finally {
+        if (!cancelled) setStatusLoading(false);
       }
-      setStatusLoading(false);
     })();
 
     return () => {
-      cancel = true;
+      cancelled = true;
     };
-  }, [authState, supabase]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -182,14 +135,9 @@ export default function PartnerProgramPage() {
     setErr(null);
     setSubmitting(true);
 
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session?.access_token) {
+    const at = await getAccessTokenOrRedirect();
+    if (!at) {
       setSubmitting(false);
-      setAuthState("anon");
-      setErr("Please log in to submit a partner request.");
       return;
     }
 
@@ -198,16 +146,17 @@ export default function PartnerProgramPage() {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
+          Authorization: `Bearer ${at}`,
         },
         credentials: "include",
         body: JSON.stringify({ handle, note, social: {} }),
       });
 
       const j = await res.json().catch(() => ({}));
-      if (!res.ok || j?.ok === false)
+
+      if (!res.ok || j?.ok === false) {
         setErr(j?.error || "Failed to submit. Please try again.");
-      else {
+      } else {
         setMsg(j?.message || "Request submitted.");
         setHandle("");
         setNote("");
@@ -222,110 +171,10 @@ export default function PartnerProgramPage() {
     }
   }
 
-  // While checking auth, show loading
-  if (authState === "checking") {
-    return (
-      <>
-        <Header />
-        <div className="min-h-[60vh] grid place-items-center">
-          <div className="text-sm text-neutral-600">Loading…</div>
-        </div>
-        <Footer />
-      </>
-    );
-  }
+  // ✅ Match /account behavior: if not authed, render nothing (redirect is happening)
+  if (!isAuthenticated) return null;
 
-  // If NOT logged in: show login CTA
-  if (authState === "anon") {
-    return (
-      <>
-        <Header />
-        <main className="min-h-[70vh] bg-[radial-gradient(60%_60%_at_20%_-10%,#FDECEC,transparent),radial-gradient(40%_50%_at_100%_0%,#E8F7FF,transparent)] flex items-center justify-center px-4">
-          <div className="w-full max-w-md rounded-3xl border bg-white/80 p-6 shadow-xl backdrop-blur text-center">
-            <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-rose-50 text-rose-700">
-              <Sparkles className="h-5 w-5" />
-            </div>
-            <h1 className="text-xl font-semibold">
-              Sign in to access the partner program
-            </h1>
-            <p className="mt-2 text-sm text-neutral-600">
-              You need an account to view your partner portal and submit an
-              application.
-            </p>
-
-            {/* ✅ Mobile-friendly hints */}
-            {(loginHint || isInAppBrowser) && (
-              <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-left">
-                <div className="text-xs font-semibold text-amber-900">
-                  Quick fix
-                </div>
-
-                {loginHint ? (
-                  <p className="mt-1 text-xs text-amber-900">{loginHint}</p>
-                ) : (
-                  <p className="mt-1 text-xs text-amber-900">
-                    If you already logged in and still see this screen, reload
-                    once.
-                  </p>
-                )}
-
-                {isInAppBrowser && (
-                  <p className="mt-2 text-xs text-amber-900">
-                    You seem to be using an in-app browser (Instagram/Facebook/LinkedIn).
-                    Login may not persist there. Please open this page in Chrome.
-                  </p>
-                )}
-
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    onClick={() => window.location.reload()}
-                    className="inline-flex items-center justify-center rounded-xl bg-black px-4 py-2 text-xs font-semibold text-white hover:bg-black/90"
-                  >
-                    Reload now
-                  </button>
-
-                  {isInAppBrowser && (
-                    <button
-                      onClick={() =>
-                        window.open(
-                          window.location.href,
-                          "_blank",
-                          "noopener,noreferrer"
-                        )
-                      }
-                      className="inline-flex items-center justify-center rounded-xl border border-neutral-300 bg-white px-4 py-2 text-xs font-semibold hover:bg-neutral-50"
-                    >
-                      Open in browser
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-
-            <div className="mt-5 flex flex-col gap-2">
-              <button
-                onClick={() =>
-                  router.push("/auth/login?redirect=/influencer-request")
-                }
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-black px-5 py-3 text-sm font-semibold text-white hover:bg-black/90"
-              >
-                Login to access <ArrowRight className="h-4 w-4" />
-              </button>
-              <button
-                onClick={() => router.push("/")}
-                className="rounded-xl border border-neutral-300 px-5 py-3 text-sm font-semibold hover:bg-white"
-              >
-                Back to home
-              </button>
-            </div>
-          </div>
-        </main>
-        <Footer />
-      </>
-    );
-  }
-
-  // ========== LOGGED-IN VIEW (unchanged portal / request UI) ==========
+  // ========== LOGGED-IN VIEW (your existing UI) ==========
   return (
     <>
       <Header />
@@ -367,8 +216,7 @@ export default function PartnerProgramPage() {
                         onClick={() => router.push("/influencer")}
                         className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 text-sm font-semibold text-white hover:bg-emerald-400"
                       >
-                        Visit partner portal{" "}
-                        <ArrowRight className="h-4 w-4" />
+                        Visit partner portal <ArrowRight className="h-4 w-4" />
                       </button>
                     ) : status === "pending" ? (
                       <span className="inline-flex items-center justify-center rounded-xl bg-amber-300/90 px-4 py-3 text-sm font-semibold text-amber-900">
@@ -379,8 +227,7 @@ export default function PartnerProgramPage() {
                         onClick={() => setOpen(true)}
                         className="inline-flex items-center justify-center gap-2 rounded-xl bg-black px-5 py-3 text-sm font-semibold text-white hover:bg-black/90"
                       >
-                        Become a partner{" "}
-                        <ArrowRight className="h-4 w-4" />
+                        Become a partner <ArrowRight className="h-4 w-4" />
                       </button>
                     )}
 
@@ -396,6 +243,7 @@ export default function PartnerProgramPage() {
                 </div>
               </div>
 
+              {/* Quick feature chips */}
               <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-4">
                 <Chip
                   icon={<Percent className="h-4 w-4" />}
@@ -422,10 +270,12 @@ export default function PartnerProgramPage() {
           </div>
         </section>
 
+        {/* Wave divider */}
         <div className="relative h-10 -mt-6 overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-b from-white to-transparent [mask-image:radial-gradient(120%_50%_at_50%_-10%,black,transparent)]" />
         </div>
 
+        {/* A. Steps */}
         <section className="mx-auto max-w-6xl px-4">
           <h2 className="mb-3 text-lg font-semibold">How it works</h2>
           <ol className="grid grid-cols-1 gap-4 sm:grid-cols-4">
@@ -456,6 +306,7 @@ export default function PartnerProgramPage() {
           </ol>
         </section>
 
+        {/* Pending ribbon */}
         {!isApproved && !statusLoading && status === "pending" && (
           <section className="mx-auto mt-4 max-w-6xl px-4">
             <div className="rounded-2xl border bg-amber-50 p-4 text-amber-900">
@@ -465,8 +316,8 @@ export default function PartnerProgramPage() {
               </div>
               <p className="mt-1 text-xs">
                 Submitted on{" "}
-                {requestedAt ? new Date(requestedAt).toLocaleString() : "—"}
-                . We usually review within 1–2 business days.
+                {requestedAt ? new Date(requestedAt).toLocaleString() : "—"}. We
+                usually review within 1–2 business days.
               </p>
               <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[11px]">
                 <span className="rounded-lg bg-white/70 px-2 py-1">
@@ -483,6 +334,7 @@ export default function PartnerProgramPage() {
           </section>
         )}
 
+        {/* B. Trust stats */}
         <section className="mx-auto mt-6 max-w-6xl px-4">
           <div className="rounded-2xl border p-5">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -505,6 +357,7 @@ export default function PartnerProgramPage() {
           </div>
         </section>
 
+        {/* D. Benefits grid */}
         <section className="mx-auto mt-6 max-w-6xl px-4">
           <h2 className="mb-3 text-lg font-semibold">Why creators love it</h2>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -529,6 +382,7 @@ export default function PartnerProgramPage() {
           </div>
         </section>
 
+        {/* E. FAQ */}
         <section className="mx-auto mt-6 max-w-6xl px-4 pb-16">
           <h2 className="mb-3 text-lg font-semibold">FAQ</h2>
           <div className="rounded-2xl border">
@@ -547,6 +401,7 @@ export default function PartnerProgramPage() {
           </div>
         </section>
 
+        {/* Application modal */}
         {open && !isApproved && status !== "pending" && (
           <div
             aria-modal="true"
@@ -617,6 +472,7 @@ export default function PartnerProgramPage() {
           </div>
         )}
 
+        {/* Inline form (fallback) */}
         {!isApproved &&
           !statusLoading &&
           (status === "none" || status === "rejected") &&
@@ -634,7 +490,9 @@ export default function PartnerProgramPage() {
                 </div>
                 <form onSubmit={submit} className="mt-4 grid gap-4">
                   <div>
-                    <label className="mb-1 block text-xs font-medium">Name</label>
+                    <label className="mb-1 block text-xs font-medium">
+                      Name
+                    </label>
                     <input
                       className="w-full rounded-lg border px-3 py-2 text-sm"
                       value={handle}
@@ -643,7 +501,9 @@ export default function PartnerProgramPage() {
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-medium">Note</label>
+                    <label className="mb-1 block text-xs font-medium">
+                      Note
+                    </label>
                     <textarea
                       rows={4}
                       className="w-full rounded-lg border px-3 py-2 text-sm"
