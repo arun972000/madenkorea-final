@@ -1,326 +1,525 @@
-// app/api/social/process-scheduled/route.ts
+// app/api/social/process-scheduled/route.js
 import { NextResponse } from "next/server";
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js";
 
 const GRAPH_BASE = "https://graph.facebook.com/v21.0";
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } }
-);
+// ---------- Shared Supabase + IG helpers (same pattern as /api/instagram/media) ----------
 
-const ADMIN_OWNER_ID =
-  process.env.FB_OWNER_ID || process.env.ADMIN_OWNER_ID || null;
+const ADMIN_OWNER_ID = process.env.FB_OWNER_ID || null;
 
-/**
- * Resolve Instagram business account info from instagram_accounts
- * (same pattern as /api/instagram/media).
- */
-async function resolveInstagramBusinessIdAdmin(supabase: SupabaseClient) {
-  const baseQuery = supabase
-    .from("instagram_accounts")
-    .select(
-      "id, owner_id, ig_business_account_id, facebook_page_id, access_token"
-    )
-    .eq("is_active", true)
-    .order("created_at", { ascending: false })
-    .limit(1);
+const STATIC_IG_BUSINESS_ID =
+  process.env.IG_BUSINESS_ACCOUNT_ID ||
+  process.env.NEXT_PUBLIC_IG_BUSINESS_ACCOUNT_ID ||
+  "";
+const STATIC_IG_ACCESS_TOKEN =
+  process.env.IG_ACCESS_TOKEN || process.env.NEXT_PUBLIC_IG_ACCESS_TOKEN || "";
+const STATIC_IG_OWNER_ID =
+  process.env.IG_OWNER_ID ||
+  ADMIN_OWNER_ID ||
+  "00000000-0000-0000-0000-000000000000";
 
-  const { data: account, error } = ADMIN_OWNER_ID
-    ? await baseQuery.eq("owner_id", ADMIN_OWNER_ID).maybeSingle()
-    : await baseQuery.maybeSingle();
-
-  if (error) throw error;
-  if (!account) {
-    throw new Error("No active instagram_accounts row found");
-  }
-
-  const userId = account.owner_id as string;
-  let igId = account.ig_business_account_id as string | null;
-  const pageId = account.facebook_page_id as string | null;
-  const accessToken = account.access_token as string | null;
-
-  if (!accessToken) {
-    throw new Error("No access_token found on instagram_accounts");
-  }
-
-  // If ig_business_account_id is missing, derive from page_id
-  if ((!igId || igId === "") && pageId) {
-    const pageRes = await fetch(
-      `${GRAPH_BASE}/${pageId}?fields=instagram_business_account&access_token=${encodeURIComponent(
-        accessToken
-      )}`
+function getAdminSupabase() {
+  if (
+    !process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    !process.env.SUPABASE_SERVICE_ROLE_KEY
+  ) {
+    throw new Error(
+      "Supabase URL or SERVICE_ROLE key missing in environment variables"
     );
-    const pageJson = await pageRes.json();
-    if (!pageRes.ok) {
-      console.error(
-        "Failed to resolve IG business account from page",
-        pageJson
-      );
-      throw new Error("Failed to resolve instagram_business_account from page");
-    }
-    igId = pageJson?.instagram_business_account?.id || null;
+  }
 
-    if (igId) {
-      await supabase
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    {
+      auth: { persistSession: false },
+    }
+  );
+}
+
+async function resolveInstagramBusinessIdAdmin(supabase) {
+  // 1) Env-based config (no DB)
+  if (STATIC_IG_BUSINESS_ID && STATIC_IG_ACCESS_TOKEN) {
+    return {
+      userId: STATIC_IG_OWNER_ID,
+      igId: STATIC_IG_BUSINESS_ID,
+      accessToken: STATIC_IG_ACCESS_TOKEN,
+    };
+  }
+
+  // 2) DB-based config
+  try {
+    let query = supabase
+      .from("instagram_accounts")
+      .select(
+        "id, owner_id, ig_business_account_id, facebook_page_id, access_token"
+      )
+      .eq("is_active", true)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (ADMIN_OWNER_ID) {
+      query = query.eq("owner_id", ADMIN_OWNER_ID);
+    }
+
+    const { data: account, error: accError } = await query.maybeSingle();
+
+    if (accError) {
+      console.error("instagram_accounts error (Supabase):", accError);
+      throw new Error(
+        "Failed to load Instagram account config from database (check Supabase URL/key and table)."
+      );
+    }
+
+    if (!account) {
+      throw new Error(
+        "No active Instagram account config found (instagram_accounts is empty)."
+      );
+    }
+
+    let igId = account.ig_business_account_id;
+    const pageId = account.facebook_page_id;
+    const token = account.access_token;
+    const userId = ADMIN_OWNER_ID || account.owner_id;
+
+    if (!token) {
+      throw new Error(
+        "No IG access token stored in instagram_accounts – please save it in settings."
+      );
+    }
+
+    const looksLikePage = igId && pageId && igId === pageId;
+    const isProbablyNotIG = igId && !String(igId).startsWith("178");
+
+    if ((!igId || looksLikePage || isProbablyNotIG) && pageId) {
+      const pageRes = await fetch(
+        `${GRAPH_BASE}/${encodeURIComponent(
+          pageId
+        )}?fields=instagram_business_account&access_token=${encodeURIComponent(
+          token
+        )}`
+      );
+
+      const pageText = await pageRes.text();
+      let pageJson = null;
+      try {
+        pageJson = JSON.parse(pageText);
+      } catch {}
+
+      if (!pageRes.ok) {
+        const fbError = pageJson?.error || pageText;
+        console.error(
+          `Error resolving instagram_business_account for page ${pageId}:`,
+          fbError
+        );
+        throw new Error(
+          "Failed to resolve Instagram Business Account from Facebook Page (check Page → IG linkage)."
+        );
+      }
+
+      const newIgId = pageJson?.instagram_business_account?.id;
+      if (!newIgId) {
+        throw new Error(
+          "No instagram_business_account.id found for this Facebook Page – ensure the page is linked to an IG business account."
+        );
+      }
+
+      igId = newIgId;
+
+      const { error: updateError } = await supabase
         .from("instagram_accounts")
         .update({ ig_business_account_id: igId })
         .eq("id", account.id);
+
+      if (updateError) {
+        console.error(
+          "Failed to update ig_business_account_id in instagram_accounts:",
+          updateError
+        );
+      }
+    }
+
+    if (!igId) {
+      throw new Error(
+        "No Instagram Business Account ID available – please sync from Facebook / settings again."
+      );
+    }
+
+    return {
+      userId,
+      igId,
+      accessToken: token,
+    };
+  } catch (e) {
+    if (String(e?.message || e).includes("fetch failed")) {
+      console.error(
+        "Supabase network error in resolveInstagramBusinessIdAdmin:",
+        e
+      );
+      throw new Error(
+        "Failed to connect to Supabase to load Instagram config. " +
+          "Either set IG_BUSINESS_ACCOUNT_ID + IG_ACCESS_TOKEN env vars, " +
+          "or fix the Supabase connection."
+      );
+    }
+    throw e;
+  }
+}
+
+// ---------- Helper: wait until IG media container is ready ----------
+
+async function waitForContainerReady(creationId, igToken, options = {}) {
+  const { maxAttempts = 8, delayMs = 2000 } = options;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const statusRes = await fetch(
+      `${GRAPH_BASE}/${encodeURIComponent(
+        creationId
+      )}?fields=status_code,status&access_token=${encodeURIComponent(igToken)}`
+    );
+
+    const statusText = await statusRes.text();
+    let statusJson = null;
+    try {
+      statusJson = JSON.parse(statusText);
+    } catch {
+      // ignore parse error
+    }
+
+    if (!statusRes.ok) {
+      console.warn(
+        `Container status check failed (attempt ${attempt}):`,
+        statusJson?.error || statusText
+      );
+    } else {
+      const statusCode = statusJson?.status_code;
+      if (statusCode === "FINISHED") {
+        return; // ready
+      }
+      if (statusCode === "ERROR" || statusCode === "EXPIRED") {
+        throw new Error(
+          `Media container status is ${statusCode} – Instagram could not process this media.`
+        );
+      }
+    }
+
+    if (attempt < maxAttempts) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
 
-  if (!igId) {
-    throw new Error("Instagram business account ID is not configured");
-  }
-
-  return { userId, igId, accessToken };
+  throw new Error(
+    "Media is still not ready after multiple attempts – Instagram says to wait longer or try again."
+  );
 }
 
-/**
- * Publish a single Instagram post and upsert into instagram_media_posts.
- */
-async function publishInstagramPost(
-  supabase: SupabaseClient,
-  ownerId: string,
-  igId: string,
-  accessToken: string,
-  payload: {
-    caption: string | null;
-    media_url: string;
-    media_type: "IMAGE" | "VIDEO";
+// ---------- IG publisher (used by scheduler) ----------
+
+async function publishInstagramPost(row, supabase) {
+  const { userId, igId, accessToken: igToken } =
+    await resolveInstagramBusinessIdAdmin(supabase);
+
+  const caption =
+    (row.message || row.caption || row.payload?.caption || "").trim();
+  const mediaUrl = (row.media_url || "").trim();
+  const mediaType = (row.media_type || "IMAGE").toUpperCase(); // IMAGE | VIDEO
+
+  if (!mediaUrl) {
+    throw new Error("media_url missing on scheduled row");
   }
-) {
-  const { caption, media_url, media_type } = payload;
 
-  // 1) Create media container
-  const form = new URLSearchParams();
+  // 1) Create container
+  const containerUrl = new URL(
+    `${GRAPH_BASE}/${encodeURIComponent(igId)}/media`
+  );
+  const params = new URLSearchParams({
+    access_token: igToken,
+  });
 
-  if (media_type === "VIDEO") {
-    form.append("media_type", "VIDEO");
-    form.append("video_url", media_url);
+  if (mediaType === "VIDEO") {
+    params.set("media_type", "VIDEO");
+    params.set("video_url", mediaUrl);
   } else {
-    form.append("image_url", media_url);
+    params.set("image_url", mediaUrl);
   }
 
   if (caption) {
-    form.append("caption", caption);
+    params.set("caption", caption);
   }
 
-  // 🔑 FIX: include the access token on the container creation call
-  form.append("access_token", accessToken);
-
-  const containerRes = await fetch(`${GRAPH_BASE}/${igId}/media`, {
+  const containerRes = await fetch(containerUrl.toString(), {
     method: "POST",
-    body: form,
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
   });
 
-  const containerJson = await containerRes.json();
+  const containerText = await containerRes.text();
+  let containerJson = null;
+  try {
+    containerJson = JSON.parse(containerText);
+  } catch {}
+
   if (!containerRes.ok) {
-    console.error("IG create container error", containerJson);
+    const fbError = containerJson?.error || containerText;
+    console.error(
+      `Error creating IG media container for ${igId} (scheduled):`,
+      fbError
+    );
     throw new Error(
-      containerJson.error?.message ||
+      containerJson?.error?.message ||
         "Failed to create Instagram media container"
     );
   }
 
   const creationId = containerJson.id;
   if (!creationId) {
-    throw new Error("No creation_id returned from IG");
+    throw new Error("No creation_id returned from Instagram (scheduled)");
   }
 
-  // NOTE: For large videos you may need polling; for now we publish immediately,
-  // same as your manual /api/instagram/media flow.
-  const publishRes = await fetch(
-    `${GRAPH_BASE}/${igId}/media_publish?creation_id=${encodeURIComponent(
-      creationId
-    )}&access_token=${encodeURIComponent(accessToken)}`,
-    { method: "POST" }
-  );
-  const publishJson = await publishRes.json();
-  if (!publishRes.ok) {
-    console.error("IG media_publish error", publishJson);
-    throw new Error(
-      publishJson.error?.message || "Failed to publish Instagram media"
+  // 2) Wait until container is FINISHED
+  await waitForContainerReady(creationId, igToken, {
+    maxAttempts: 8,
+    delayMs: 2000,
+  });
+
+  // 3) Publish – with special handling for error 9007 / 2207027
+  async function doPublish() {
+    const publishUrl = new URL(
+      `${GRAPH_BASE}/${encodeURIComponent(igId)}/media_publish`
     );
+    const publishParams = new URLSearchParams({
+      creation_id: creationId,
+      access_token: igToken,
+    });
+
+    const publishRes = await fetch(publishUrl.toString(), {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: publishParams.toString(),
+    });
+
+    const publishText = await publishRes.text();
+    let publishJson = null;
+    try {
+      publishJson = JSON.parse(publishText);
+    } catch {}
+
+    if (!publishRes.ok) {
+      const err = publishJson?.error || publishText;
+      console.error("IG media_publish error", err);
+
+      // Specific case: Media not ready yet (your production error)
+      if (
+        err &&
+        err.code === 9007 &&
+        err.error_subcode === 2207027
+      ) {
+        throw new Error("Media ID is not available");
+      }
+
+      throw new Error(err?.message || "Failed to publish Instagram media");
+    }
+
+    return publishJson;
+  }
+
+  let publishJson;
+  try {
+    publishJson = await doPublish();
+  } catch (err) {
+    // If it's the "Media ID is not available" error, give it one more chance
+    if (String(err?.message || "").includes("Media ID is not available")) {
+      // wait a bit longer and retry once
+      await waitForContainerReady(creationId, igToken, {
+        maxAttempts: 5,
+        delayMs: 3000,
+      });
+      publishJson = await doPublish(); // if this fails again, it throws out
+    } else {
+      throw err;
+    }
   }
 
   const igMediaId = publishJson.id;
   if (!igMediaId) {
-    throw new Error("No ig_media_id returned from media_publish");
+    throw new Error("Media ID is not available after publish");
   }
 
-  // 3) Fetch full media details
-  const fields =
-    "id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count";
-  const mediaRes = await fetch(
-    `${GRAPH_BASE}/${igMediaId}?fields=${fields}&access_token=${encodeURIComponent(
-      accessToken
-    )}`
-  );
-  const mediaJson = await mediaRes.json();
-  if (!mediaRes.ok) {
-    console.error("IG get media detail error", mediaJson);
-    throw new Error(mediaJson.error?.message || "Failed to load IG media");
+  // Optional: upsert into instagram_media_posts so it appears immediately
+  try {
+    const detailsRes = await fetch(
+      `${GRAPH_BASE}/${encodeURIComponent(
+        igMediaId
+      )}?fields=id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count&access_token=${encodeURIComponent(
+        igToken
+      )}`
+    );
+    const detailsText = await detailsRes.text();
+    let detailsJson = null;
+    try {
+      detailsJson = JSON.parse(detailsText);
+    } catch {}
+
+    const media = detailsJson || {
+      id: igMediaId,
+      caption,
+      media_type: mediaType,
+      media_url: mediaUrl,
+    };
+
+    const record = {
+      owner_id: userId,
+      ig_business_account_id: igId,
+      ig_media_id: media.id,
+      caption: media.caption || caption || null,
+      media_type: media.media_type || mediaType || null,
+      media_url: media.media_url || mediaUrl || null,
+      thumbnail_url: media.thumbnail_url || null,
+      permalink: media.permalink || null,
+      like_count:
+        typeof media.like_count === "number" ? media.like_count : null,
+      comments_count:
+        typeof media.comments_count === "number"
+          ? media.comments_count
+          : null,
+      timestamp: media.timestamp
+        ? new Date(media.timestamp).toISOString()
+        : new Date().toISOString(),
+    };
+
+    const { error: upsertError } = await supabase
+      .from("instagram_media_posts")
+      .upsert(record, { onConflict: "owner_id,ig_media_id" });
+
+    if (upsertError) {
+      console.error(
+        "Upsert error instagram_media_posts (scheduled):",
+        upsertError
+      );
+    }
+  } catch (detailsErr) {
+    console.error(
+      "Failed to fetch / upsert IG details for scheduled post:",
+      detailsErr
+    );
   }
 
-  const record = {
-    owner_id: ownerId,
-    ig_business_account_id: igId,
-    ig_media_id: mediaJson.id,
-    caption: mediaJson.caption || null,
-    media_type: mediaJson.media_type || null,
-    media_url: mediaJson.media_url || null,
-    thumbnail_url: mediaJson.thumbnail_url || null,
-    permalink: mediaJson.permalink || null,
-    like_count: mediaJson.like_count ?? null,
-    comments_count: mediaJson.comments_count ?? null,
-    timestamp: mediaJson.timestamp
-      ? new Date(mediaJson.timestamp).toISOString()
-      : null,
-  };
-
-  const { data, error } = await supabase
-    .from("instagram_media_posts")
-    .upsert(record, {
-      onConflict: "owner_id,ig_media_id",
+  // Mark scheduled row as posted
+  await supabase
+    .from("social_scheduled_posts")
+    .update({
+      status: "posted",
+      posted_at: new Date().toISOString(),
+      ig_media_id: igMediaId,
+      last_error: null,
+      error_message: null,
     })
-    .select(
-      "id, ig_media_id, caption, media_type, media_url, thumbnail_url, permalink, like_count, comments_count, timestamp"
-    )
-    .single();
+    .eq("id", row.id);
 
-  if (error) {
-    console.error("instagram_media_posts upsert error", error);
-    throw new Error("Failed to upsert instagram_media_posts");
-  }
-
-  return { dbMedia: data, igMediaId };
+  return igMediaId;
 }
 
-/**
- * POST /api/social/process-scheduled
- * Called periodically (e.g. from frontend interval) to publish due Instagram posts.
- */
-export async function POST() {
-  try {
-    const { userId, igId, accessToken } =
-      await resolveInstagramBusinessIdAdmin(supabaseAdmin);
+// ---------- (Optional) stub for Facebook – keep / replace with your existing logic ----------
 
+async function publishFacebookPost(row, supabase) {
+  // If you already had a working FB publishing flow, keep that code instead.
+  // Here we just mark it as "failed" if not implemented.
+  throw new Error("Facebook scheduled publishing is not implemented here.");
+}
+
+// ---------- Main scheduler endpoint ----------
+
+export async function POST() {
+  const supabase = getAdminSupabase();
+
+  try {
     const nowIso = new Date().toISOString();
 
-    // Fetch due posts: platform='instagram', status='pending', scheduled_at <= now
-    const { data: duePosts, error } = await supabaseAdmin
+    // Grab a few due & pending jobs
+    const { data: jobs, error } = await supabase
       .from("social_scheduled_posts")
       .select("*")
-      .eq("platform", "instagram")
       .eq("status", "pending")
       .lte("scheduled_at", nowIso)
       .order("scheduled_at", { ascending: true })
       .limit(5);
 
     if (error) {
-      console.error("fetch due scheduled posts error", error);
+      console.error("Error loading pending scheduled posts:", error);
       return NextResponse.json(
-        { error: "Failed to fetch scheduled posts" },
+        { error: "Failed to load pending scheduled posts" },
         { status: 500 }
       );
     }
 
-    if (!duePosts || duePosts.length === 0) {
-      return NextResponse.json({ processed: 0, posted: 0, failed: 0 });
+    if (!jobs || jobs.length === 0) {
+      return NextResponse.json(
+        { processed: 0, results: [] },
+        { status: 200 }
+      );
     }
 
-    let posted = 0;
-    let failed = 0;
+    const results = [];
 
-    for (const post of duePosts as any[]) {
+    for (const job of jobs) {
+      // Mark as processing to avoid double-processing
+      await supabase
+        .from("social_scheduled_posts")
+        .update({
+          status: "processing",
+          last_error: null,
+          error_message: null,
+        })
+        .eq("id", job.id);
+
       try {
-        // Optional: mark as processing to avoid double-run if multiple workers
-        await supabaseAdmin
-          .from("social_scheduled_posts")
-          .update({ status: "processing" })
-          .eq("id", post.id)
-          .eq("status", "pending");
-
-        const payload = (post.payload || {}) as any;
-
-        // Derive caption/message + media info
-        const caption: string | null =
-          (post.message as string | null) ||
-          (payload.caption as string | undefined) ||
-          null;
-
-        const mediaUrl: string | null =
-          (post.media_url as string | null) ||
-          (payload.media_url as string | undefined) ||
-          null;
-
-        const mediaType: "IMAGE" | "VIDEO" =
-          ((post.media_type as string | null) ||
-            payload.media_type ||
-            "IMAGE") === "VIDEO"
-            ? "VIDEO"
-            : "IMAGE";
-
-        if (!mediaUrl) {
-          throw new Error("Scheduled post has no media_url");
-        }
-
-        const { igMediaId } = await publishInstagramPost(
-          supabaseAdmin,
-          userId,
-          igId,
-          accessToken,
-          {
-            caption,
-            media_url: mediaUrl,
-            media_type: mediaType,
-          }
-        );
-
-        await supabaseAdmin
-          .from("social_scheduled_posts")
-          .update({
-            status: "posted",
-            posted_at: new Date().toISOString(),
+        if (job.platform === "instagram") {
+          const igMediaId = await publishInstagramPost(job, supabase);
+          results.push({
+            id: job.id,
+            platform: job.platform,
+            success: true,
             ig_media_id: igMediaId,
-            last_error: null,
-            error_message: null,
-            payload: {
-              ...payload,
-              published_ig_media_id: igMediaId,
-            },
-          })
-          .eq("id", post.id);
-
-        posted += 1;
-      } catch (err: any) {
-        console.error("scheduled post failed", post.id, err);
-        await supabaseAdmin
+          });
+        } else if (job.platform === "facebook") {
+          await publishFacebookPost(job, supabase);
+          results.push({
+            id: job.id,
+            platform: job.platform,
+            success: true,
+          });
+        } else {
+          throw new Error(`Unsupported platform: ${job.platform}`);
+        }
+      } catch (err) {
+        console.error("scheduled post failed", job.id, err);
+        await supabase
           .from("social_scheduled_posts")
           .update({
             status: "failed",
-            last_error: err.message || "Unknown error",
-            error_message: err.message || "Unknown error",
+            last_error: String(err?.message || err),
+            error_message: String(err?.message || err),
           })
-          .eq("id", post.id);
-        failed += 1;
+          .eq("id", job.id);
+
+        results.push({
+          id: job.id,
+          platform: job.platform,
+          success: false,
+          error: String(err?.message || err),
+        });
       }
     }
 
-    return NextResponse.json({
-      processed: duePosts.length,
-      posted,
-      failed,
-    });
-  } catch (err: any) {
-    console.error("/api/social/process-scheduled error", err);
     return NextResponse.json(
-      { error: err.message || "Failed to process scheduled posts" },
+      { processed: results.length, results },
+      { status: 200 }
+    );
+  } catch (err) {
+    console.error("POST /api/social/process-scheduled error", err);
+    return NextResponse.json(
+      { error: "Failed to process scheduled posts", details: String(err) },
       { status: 500 }
     );
   }
