@@ -1,7 +1,7 @@
 // app/(admin)/social/facebook/CampaignList.jsx
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   Facebook,
   Image as ImageIcon,
@@ -21,10 +21,15 @@ function cn(...classes) {
   return classes.filter(Boolean).join(" ");
 }
 
+const LS_KEY = "fb_scheduled_posts";
+
 export default function CampaignList() {
   const [posts, setPosts] = useState([]);
   const [loadingPosts, setLoadingPosts] = useState(false);
   const [error, setError] = useState("");
+
+  // ⭐ Local scheduled posts (stored in localStorage)
+  const [scheduledPosts, setScheduledPosts] = useState([]);
 
   // create composer
   const [showCreate, setShowCreate] = useState(false);
@@ -36,6 +41,12 @@ export default function CampaignList() {
   const [mediaPreview, setMediaPreview] = useState("");
   const [mediaType, setMediaType] = useState("IMAGE"); // IMAGE | VIDEO
   const [creating, setCreating] = useState(false);
+
+  // ⭐ Scheduling state (local-only)
+  const [isScheduled, setIsScheduled] = useState(false);
+  const [scheduledDate, setScheduledDate] = useState(""); // yyyy-MM-dd
+  const [scheduledTime, setScheduledTime] = useState(""); // HH:mm
+  const [scheduling, setScheduling] = useState(false);
 
   // edit
   const [editingId, setEditingId] = useState(null);
@@ -50,9 +61,41 @@ export default function CampaignList() {
   const [newComment, setNewComment] = useState("");
   const [commentLoading, setCommentLoading] = useState(false);
 
+  // ref to always have latest scheduledPosts inside interval
+  const scheduledRef = useRef([]);
+  useEffect(() => {
+    scheduledRef.current = scheduledPosts;
+  }, [scheduledPosts]);
+
   useEffect(() => {
     fetchPosts();
+
+    // Load scheduled posts from localStorage
+    try {
+      const raw = typeof window !== "undefined"
+        ? window.localStorage.getItem(LS_KEY)
+        : null;
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          setScheduledPosts(parsed);
+        }
+      }
+    } catch (err) {
+      console.error("Error reading fb_scheduled_posts from localStorage", err);
+    }
   }, []);
+
+  // Persist scheduled posts to localStorage when changed
+  useEffect(() => {
+    try {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(LS_KEY, JSON.stringify(scheduledPosts));
+      }
+    } catch (err) {
+      console.error("Error writing fb_scheduled_posts to localStorage", err);
+    }
+  }, [scheduledPosts]);
 
   async function fetchPosts() {
     try {
@@ -78,6 +121,10 @@ export default function CampaignList() {
     setMediaFile(null);
     setMediaPreview("");
     setMediaType("IMAGE");
+    setIsScheduled(false);
+    setScheduledDate("");
+    setScheduledTime("");
+    setScheduling(false);
   }
 
   async function uploadMediaIfAny() {
@@ -93,11 +140,22 @@ export default function CampaignList() {
     if (!res.ok) {
       throw new Error(json.error || "Upload failed");
     }
-    return json.publicUrl;
+    // Support {url} or {publicUrl}/etc
+    return json.url || json.publicUrl || json.publicURL || null;
   }
 
+  function buildFullMessage(msg, hash) {
+    const m = (msg || "").trim();
+    const h = (hash || "").trim();
+    if (!m && !h) return "";
+    if (!h) return m;
+    if (!m) return h;
+    return `${m}\n\n${h}`;
+  }
+
+  // 👉 Post immediately (unchanged)
   async function handleCreatePost(e) {
-    e.preventDefault();
+    if (e) e.preventDefault();
 
     if (!message.trim() && !mediaFile) {
       alert("Write something or attach a media file before posting.");
@@ -108,7 +166,7 @@ export default function CampaignList() {
       setCreating(true);
       setError("");
 
-      const fullMessage = tags ? `${message}\n\n${tags}` : message;
+      const fullMessage = buildFullMessage(message, tags);
       const mediaUrl = await uploadMediaIfAny();
 
       const res = await fetch("/api/facebook/page-posts", {
@@ -135,7 +193,151 @@ export default function CampaignList() {
     }
   }
 
-  // ✅ use SAME AI endpoint as Instagram
+  // ⭐ Local-only scheduler: store in localStorage and a JS timer posts later
+  async function handleSchedulePost() {
+    if (!message.trim() && !mediaFile) {
+      alert("Write something or attach a media file before scheduling.");
+      return;
+    }
+
+    if (!scheduledDate || !scheduledTime) {
+      alert("Please select both date and time for scheduling.");
+      return;
+    }
+
+    const scheduledLocal = new Date(`${scheduledDate}T${scheduledTime}`);
+    if (isNaN(scheduledLocal.getTime())) {
+      alert("Invalid schedule date or time.");
+      return;
+    }
+
+    if (scheduledLocal.getTime() < Date.now() - 60_000) {
+      if (
+        !confirm(
+          "The selected time is in the past or very close to now. Schedule anyway?"
+        )
+      ) {
+        return;
+      }
+    }
+
+    const fullMessage = buildFullMessage(message, tags);
+
+    try {
+      setScheduling(true);
+      setError("");
+
+      // Upload media now so we only need a URL at fire time
+      const mediaUrl = await uploadMediaIfAny();
+
+      const job = {
+        id: `fb-local-${Date.now()}`,
+        channel: "facebook",
+        message: fullMessage,
+        media_url: mediaUrl,
+        media_type: mediaType,
+        scheduled_at: scheduledLocal.toISOString(),
+        status: "pending",
+        created_at: new Date().toISOString(),
+      };
+
+      setScheduledPosts((prev) => [job, ...prev]);
+
+      alert(
+        `Facebook post scheduled locally for ${scheduledLocal.toLocaleString()}. ` +
+          "Keep this admin page open around that time to let it auto-post."
+      );
+
+      resetCreateForm();
+      setShowCreate(false);
+    } catch (err) {
+      console.error("handleSchedulePost error:", err);
+      alert("Failed to schedule post: " + (err.message || err));
+    } finally {
+      setScheduling(false);
+    }
+  }
+
+  // 🔁 Background timer: auto-post when local scheduled time is reached
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      const now = Date.now();
+      const snapshot = scheduledRef.current;
+
+      // find due jobs that are still pending
+      const dueJobs = snapshot.filter((job) => {
+        if (job.status !== "pending") return false;
+        if (!job.scheduled_at) return false;
+        const t = new Date(job.scheduled_at).getTime();
+        return !isNaN(t) && t <= now;
+      });
+
+      if (!dueJobs.length) return;
+
+      for (const job of dueJobs) {
+        await publishScheduledJob(job);
+      }
+    }, 30_000); // check every 30 seconds
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Helper: publish one scheduled job via /api/facebook/page-posts
+  async function publishScheduledJob(job) {
+    // mark as processing
+    setScheduledPosts((prev) =>
+      prev.map((j) =>
+        j.id === job.id ? { ...j, status: "processing" } : j
+      )
+    );
+
+    try {
+      const res = await fetch("/api/facebook/page-posts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: job.message,
+          media_url: job.media_url || null,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.error || "Failed to auto-post scheduled job");
+      }
+
+      // mark as posted
+      setScheduledPosts((prev) =>
+        prev.map((j) =>
+          j.id === job.id
+            ? {
+                ...j,
+                status: "posted",
+                posted_at: new Date().toISOString(),
+              }
+            : j
+        )
+      );
+
+      // refresh feed from Facebook (so if a post was deleted on FB, next refresh hides it)
+      fetchPosts();
+    } catch (err) {
+      console.error("publishScheduledJob error:", err);
+      setScheduledPosts((prev) =>
+        prev.map((j) =>
+          j.id === job.id
+            ? {
+                ...j,
+                status: "failed",
+                error_message: err.message || String(err),
+              }
+            : j
+        )
+      );
+    }
+  }
+
+  // ✅ AI optimize using same /api/ai/social-copy as Instagram
   async function handleGenerateCopy() {
     const baseText = message.trim();
     if (!baseText) {
@@ -149,16 +351,26 @@ export default function CampaignList() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          platform: "facebook",
           baseText,
-          wantHashtags: true,
+          channel: "facebook",
         }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "AI error");
 
-      if (json.optimizedText) setMessage(json.optimizedText);
-      if (json.hashtags) setTags(json.hashtags);
+      if (json.caption) {
+        setMessage(String(json.caption));
+      }
+
+      if (json.hashtags !== undefined) {
+        let t = "";
+        if (Array.isArray(json.hashtags)) {
+          t = json.hashtags.join(" ");
+        } else {
+          t = String(json.hashtags);
+        }
+        setTags(t);
+      }
     } catch (err) {
       console.error(err);
       alert("AI generation failed: " + (err.message || err));
@@ -322,6 +534,10 @@ export default function CampaignList() {
     }
   }
 
+  const visibleScheduled = scheduledPosts.filter(
+    (job) => job.status === "pending" || job.status === "processing"
+  );
+
   return (
     <div className="min-h-screen bg-[#18191a] text-[#e4e6eb]">
       {/* top bar */}
@@ -367,7 +583,10 @@ export default function CampaignList() {
             <div className="flex items-center justify-between mb-3">
               <div className="font-semibold text-sm">Create post</div>
               <button
-                onClick={() => setShowCreate(false)}
+                onClick={() => {
+                  setShowCreate(false);
+                  resetCreateForm();
+                }}
                 className="text-[#b0b3b8] hover:text-white"
               >
                 <X className="w-4 h-4" />
@@ -438,38 +657,157 @@ export default function CampaignList() {
                 </div>
               )}
 
-              <div className="flex items-center justify-end gap-2 pt-1">
+              {/* ⭐ Scheduling controls */}
+              <div className="space-y-2 pt-2 border-t border-[#3a3b3c]">
+                <label className="inline-flex items-center gap-2 text-[11px] text-[#e4e6eb]">
+                  <input
+                    type="checkbox"
+                    className="rounded border-[#3a3b3c] bg-[#18191a]"
+                    checked={isScheduled}
+                    onChange={(e) => setIsScheduled(e.target.checked)}
+                  />
+                  <span>Schedule this post instead of posting now (local)</span>
+                </label>
+
+                {isScheduled && (
+                  <div className="flex flex-wrap items-center gap-3 text-[11px]">
+                    <div className="flex flex-col">
+                      <span className="text-[#b0b3b8] mb-0.5">Date</span>
+                      <input
+                        type="date"
+                        className="rounded-lg border border-[#3a3b3c] bg-[#18191a] px-2 py-1 text-xs outline-none"
+                        value={scheduledDate}
+                        onChange={(e) => setScheduledDate(e.target.value)}
+                      />
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[#b0b3b8] mb-0.5">Time</span>
+                      <input
+                        type="time"
+                        className="rounded-lg border border-[#3a3b3c] bg-[#18191a] px-2 py-1 text-xs outline-none"
+                        value={scheduledTime}
+                        onChange={(e) => setScheduledTime(e.target.value)}
+                      />
+                    </div>
+                    <span className="text-[#b0b3b8]">
+                      Uses your local timezone and this browser tab.
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-2 pt-1">
                 <button
                   type="button"
                   onClick={resetCreateForm}
                   className="px-3 py-1.5 rounded-full text-xs bg-[#3a3b3c] hover:bg-[#4a4b4d]"
-                  disabled={creating}
+                  disabled={creating || scheduling}
                 >
                   Clear
                 </button>
-                <button
-                  type="submit"
-                  disabled={creating || (!message.trim() && !mediaFile)}
-                  className={cn(
-                    "inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-medium bg-[#2374e1] hover:bg-[#1b63c9]",
-                    creating && "opacity-70 cursor-not-allowed"
-                  )}
-                >
-                  {creating ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Send className="w-4 h-4" />
-                  )}
-                  <span>Post now</span>
-                </button>
+
+                {!isScheduled ? (
+                  <button
+                    type="submit"
+                    disabled={creating || (!message.trim() && !mediaFile)}
+                    className={cn(
+                      "inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-medium bg-[#2374e1] hover:bg-[#1b63c9]",
+                      creating && "opacity-70 cursor-not-allowed"
+                    )}
+                  >
+                    {creating ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Send className="w-4 h-4" />
+                    )}
+                    <span>Post now</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={
+                      scheduling ||
+                      (!message.trim() && !mediaFile) ||
+                      !scheduledDate ||
+                      !scheduledTime
+                    }
+                    onClick={handleSchedulePost}
+                    className={cn(
+                      "inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-medium bg-indigo-600 hover:bg-indigo-700",
+                      scheduling && "opacity-70 cursor-not-allowed"
+                    )}
+                  >
+                    {scheduling ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Send className="w-4 h-4" />
+                    )}
+                    <span>Schedule (local)</span>
+                  </button>
+                )}
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* posts feed */}
+      {/* posts feed + scheduled list */}
       <div className="px-6 pt-4 pb-10 max-w-3xl mx-auto">
+        {/* Scheduled posts panel */}
+        {visibleScheduled.length > 0 && (
+          <div className="mb-4 bg-[#242526] border border-[#3a3b3c] rounded-xl p-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-xs font-semibold text-[#e4e6eb]">
+                Scheduled Facebook posts (local to this browser)
+              </div>
+            </div>
+
+            <div className="space-y-2 max-h-56 overflow-y-auto">
+              {visibleScheduled.map((job) => {
+                const when = job.scheduled_at
+                  ? new Date(job.scheduled_at)
+                  : null;
+                const whenLabel = when
+                  ? when.toLocaleString()
+                  : "Unknown time";
+                const shortMsg =
+                  job.message && job.message.length > 100
+                    ? job.message.slice(0, 97) + "..."
+                    : job.message || "(no message)";
+
+                return (
+                  <div
+                    key={job.id}
+                    className="flex items-center justify-between rounded-lg bg-[#3a3b3c] px-3 py-2 text-xs"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-[#e4e6eb] line-clamp-1">
+                        {shortMsg}
+                      </div>
+                      <div className="text-[10px] text-[#b0b3b8]">
+                        Scheduled at: {whenLabel}
+                      </div>
+                    </div>
+                    <div className="ml-3 text-[10px]">
+                      <span
+                        className={cn(
+                          "px-2 py-0.5 rounded-full capitalize",
+                          job.status === "processing"
+                            ? "bg-yellow-500/20 text-yellow-300"
+                            : "bg-blue-500/20 text-blue-300"
+                        )}
+                      >
+                        {job.status}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Recent posts header */}
         <div className="flex items-center justify-between mb-3">
           <div className="text-sm font-semibold flex items-center gap-2">
             Recent posts
@@ -508,7 +846,6 @@ export default function CampaignList() {
               ? created.toLocaleString()
               : "Unknown date";
 
-            // ✅ better media extraction for playable video
             const rawAttachments = post.attachments;
             const attachment = Array.isArray(rawAttachments?.data)
               ? rawAttachments.data[0]
@@ -601,7 +938,7 @@ export default function CampaignList() {
                   )}
                 </div>
 
-                {/* ✅ media (video now prefers media.source and is playable) */}
+                {/* media */}
                 {mediaUrl && (
                   <div className="mt-1 bg-black flex items-center justify-center max-h-[480px]">
                     {isVideo ? (

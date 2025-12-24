@@ -2,127 +2,141 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } }
-);
+// Re-use the same admin pattern as other social routes
+function getAdminSupabase() {
+  if (
+    !process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    !process.env.SUPABASE_SERVICE_ROLE_KEY
+  ) {
+    throw new Error(
+      "Supabase URL or SERVICE_ROLE key missing in environment variables"
+    );
+  }
 
-const ADMIN_OWNER_ID =
-  process.env.FB_OWNER_ID || process.env.ADMIN_OWNER_ID || null;
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    {
+      auth: { persistSession: false },
+    }
+  );
+}
 
+// Use a fixed owner for scheduled jobs (same idea as IG routes)
+const DEFAULT_OWNER_ID =
+  process.env.IG_OWNER_ID ||
+  process.env.FB_OWNER_ID ||
+  process.env.INSTAGRAM_OWNER_ID ||
+  "00000000-0000-0000-0000-000000000000";
+
+
+  
 export async function POST(req: Request) {
   try {
+    const supabase = getAdminSupabase();
     const body = await req.json();
 
     let {
-      channel,
       platform,
+      channel,
       caption,
       message,
       media_url,
       media_type,
       scheduled_at,
-    } = body as {
-      channel?: string;
-      platform?: string;
-      caption?: string;
-      message?: string;
-      media_url?: string;
-      media_type?: string;
-      scheduled_at?: string;
-    };
+      payload,
+    } = body;
 
-    // Map channel/platform -> your enum column
-    const effectivePlatform = (platform || channel || "instagram") as string;
-
-    if (!media_url || !media_type || !scheduled_at) {
+    if (!scheduled_at) {
       return NextResponse.json(
-        { error: "media_url, media_type and scheduled_at are required" },
+        { error: "scheduled_at is required" },
         { status: 400 }
       );
     }
 
-    if (effectivePlatform !== "instagram") {
+    // Normalise platform / channel
+    platform = (platform || "").toLowerCase();
+    channel = channel || null;
+
+    // Infer platform from channel if not provided
+    if (!platform) {
+      if (channel && channel.toLowerCase().includes("instagram")) {
+        platform = "instagram";
+      } else if (channel && channel.toLowerCase().includes("facebook")) {
+        platform = "facebook";
+      }
+    }
+
+    // ✨ NOW: support BOTH instagram and facebook
+    if (platform !== "instagram" && platform !== "facebook") {
       return NextResponse.json(
-        { error: "Only instagram scheduling is supported for now" },
+        {
+          error:
+            "Unsupported platform. Only 'instagram' and 'facebook' scheduling are supported.",
+        },
         { status: 400 }
       );
     }
+
+    // Normalise text into message column
+    const text =
+      (caption ?? "").toString().trim() ||
+      (message ?? "").toString().trim() ||
+      "";
 
     const scheduledDate = new Date(scheduled_at);
-    if (Number.isNaN(scheduledDate.getTime())) {
+    if (isNaN(scheduledDate.getTime())) {
       return NextResponse.json(
-        { error: "Invalid scheduled_at format" },
+        { error: "scheduled_at is not a valid date" },
         { status: 400 }
       );
     }
 
-    // ---- resolve owner_id (required, NOT NULL) ----
-    let ownerId = ADMIN_OWNER_ID as string | null;
-
-    if (!ownerId) {
-      const { data: account, error: accErr } = await supabaseAdmin
-        .from("instagram_accounts")
-        .select("owner_id")
-        .eq("is_active", true)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (accErr) {
-        console.error("resolve owner_id error", accErr);
-        throw new Error("Failed to determine owner_id");
-      }
-      if (!account) {
-        throw new Error(
-          "No active instagram_accounts row found to determine owner_id"
-        );
-      }
-      ownerId = account.owner_id;
-    }
-
-    // Use your message column as the caption text
-    const finalMessage =
-      (message && message.trim()) ||
-      (caption && caption.trim()) ||
-      null;
-
-    const payload = {
-      caption: caption ?? finalMessage ?? "",
-      media_url,
-      media_type,
+    const row = {
+      owner_id: DEFAULT_OWNER_ID,
+      platform, // 'instagram' | 'facebook'
+      channel,  // e.g. 'instagram', 'facebook_page'
+      message: text || null,
+      media_url: media_url || null,
+      media_type: media_type || null,
+      scheduled_at: scheduledDate.toISOString(),
+      status: "pending" as const,
+      payload: {
+        ...(payload || {}),
+        platform,
+        channel,
+        caption: caption ?? null,
+        message: message ?? null,
+        media_url: media_url ?? null,
+        media_type: media_type ?? null,
+      },
     };
 
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await supabase
       .from("social_scheduled_posts")
-      .insert({
-        owner_id: ownerId,
-        platform: effectivePlatform, // must be 'instagram' | 'facebook'
-        channel: effectivePlatform,  // optional helper
-        message: finalMessage,
-        media_url,
-        media_type,
-        scheduled_at: scheduledDate.toISOString(),
-        status: "pending",
-        payload,
-      })
+      .insert(row)
       .select("*")
       .single();
 
     if (error) {
-      console.error("social_scheduled_posts insert error", error);
+      console.error("Error inserting into social_scheduled_posts:", error);
       return NextResponse.json(
-        { error: "Failed to insert scheduled post" },
+        {
+          error: "Failed to schedule post",
+          details: error.message || String(error),
+        },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({ data });
+    return NextResponse.json({ data }, { status: 200 });
   } catch (err: any) {
-    console.error("/api/social/schedule error", err);
+    console.error("POST /api/social/schedule error", err);
     return NextResponse.json(
-      { error: err.message || "Failed to schedule post" },
+      {
+        error: "Failed to schedule post",
+        details: err?.message || String(err),
+      },
       { status: 500 }
     );
   }

@@ -232,6 +232,30 @@ export default function AdminDashboard() {
             </CardContent>
           </Card>
 
+          <Card className="hover:shadow-lg transition-shadow">
+            <CardHeader>
+              <Instagram className="h-8 w-8 mb-2 text-primary" />
+              <Facebook className="h-8 w-8 mb-2 text-primary" />
+              <CardTitle>Multi-Channel Marketing</CardTitle>
+              <CardDescription>
+                Schedule, post & manage IG content
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground mb-4">
+                Access the Instagram and Facebook panel for posts, AI captions, comments, and
+                performance.
+              </p>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => router.push("/admin/marketing/multichannel")}
+              >
+                Open MultiChannel Panel
+              </Button>
+            </CardContent>
+          </Card>
+
           {/* Instagram Marketing */}
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader>
