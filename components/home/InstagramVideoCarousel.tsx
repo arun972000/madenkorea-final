@@ -1,32 +1,33 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { InfluencerVideo } from "@/types/influencer_video";
 import { Button } from "@/components/ui/button";
 import { Volume2, VolumeX, ExternalLink } from "lucide-react";
 
-export function InstagramVideoCarousel({
-  videos,
-}: {
-  videos: InfluencerVideo[];
-}) {
+export function InstagramVideoCarousel({ videos }: { videos: InfluencerVideo[] }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+
   const [isPaused, setIsPaused] = useState(false);
   const [slidesPerView, setSlidesPerView] = useState(6);
   const [currentPage, setCurrentPage] = useState(0);
 
-  const items = useMemo(
-    () => (videos ?? []).filter((v) => !!v.video_url),
-    [videos]
-  );
+  // ✅ single active video (ONLY this one can play)
+  const [activeId, setActiveId] = useState<string | number | null>(null);
+
+  const items = useMemo(() => (videos ?? []).filter((v) => !!v.video_url), [videos]);
   if (!items.length) return null;
+
+  // starting active video
+  useEffect(() => {
+    if (activeId == null && items.length > 0) setActiveId(items[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.length]);
 
   // duplicate once for seamless loop
   const loopItems = useMemo(
-    () => [
-      ...items,
-      ...items.map((v, i) => ({ ...v, id: `${v.id}-dup-${i}` })),
-    ],
+    () => [...items, ...items.map((v, i) => ({ ...v, id: `${v.id}-dup-${i}` }))],
     [items]
   );
 
@@ -57,22 +58,27 @@ export function InstagramVideoCarousel({
     el.scrollLeft = idx * s;
   };
 
-  const totalPages = Math.max(
-    1,
-    Math.ceil(items.length / Math.max(1, slidesPerView))
-  );
+  const totalPages = Math.max(1, Math.ceil(items.length / Math.max(1, slidesPerView)));
 
-  const computeAndSetPage = () => {
+  // ✅ compute page + set active id based on scroll position
+  const computeFromScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
+
     const s = getStep();
     if (!s) return;
-    const idxRaw = Math.round(el.scrollLeft / s);
+
+    const idxRaw = Math.round(el.scrollLeft / s); // includes clones
     const idx = ((idxRaw % items.length) + items.length) % items.length; // normalize to original set
+
+    // set the active (only it can play)
+    const newActive = items[idx]?.id ?? null;
+    if (newActive != null) setActiveId(newActive);
+
     const spv = readSlidesFromCSSVar();
     const page = Math.floor(idx / Math.max(1, spv));
     setCurrentPage(Math.min(totalPages - 1, Math.max(0, page)));
-  };
+  }, [items, totalPages]);
 
   // autoplay + seamless loop + responsive syncing
   useEffect(() => {
@@ -83,7 +89,7 @@ export function InstagramVideoCarousel({
     syncSpv();
 
     alignToSnap();
-    computeAndSetPage();
+    computeFromScroll();
 
     let tickTimer: number | null = null;
     let afterScrollTimer: number | null = null;
@@ -99,12 +105,12 @@ export function InstagramVideoCarousel({
 
       if (afterScrollTimer) window.clearTimeout(afterScrollTimer);
       afterScrollTimer = window.setTimeout(() => {
-        const half = el.scrollWidth / 2; // original-set width
+        const half = el.scrollWidth / 2;
         if (el.scrollLeft >= half - s / 2) {
-          el.scrollLeft = el.scrollLeft - half; // jump back exactly one set
+          el.scrollLeft = el.scrollLeft - half;
         }
         alignToSnap();
-        computeAndSetPage();
+        computeFromScroll();
       }, 450) as unknown as number;
     };
 
@@ -112,8 +118,8 @@ export function InstagramVideoCarousel({
 
     const onScroll = () => {
       const half = el.scrollWidth / 2;
-      if (el.scrollLeft >= half - 2) el.scrollLeft = el.scrollLeft - half; // seamless
-      computeAndSetPage();
+      if (el.scrollLeft >= half - 2) el.scrollLeft = el.scrollLeft - half;
+      computeFromScroll();
     };
     el.addEventListener("scroll", onScroll, { passive: true });
 
@@ -121,7 +127,7 @@ export function InstagramVideoCarousel({
       syncSpv();
       requestAnimationFrame(() => {
         alignToSnap();
-        computeAndSetPage();
+        computeFromScroll();
       });
     };
     window.addEventListener("resize", onResize);
@@ -132,7 +138,7 @@ export function InstagramVideoCarousel({
       el.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onResize);
     };
-  }, [isPaused, items.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isPaused, computeFromScroll]);
 
   const goToPage = (pageIndex: number) => {
     const el = scrollRef.current;
@@ -153,9 +159,10 @@ export function InstagramVideoCarousel({
 
     setIsPaused(true);
     el.scrollTo({ left: target, behavior: "smooth" });
+
     window.setTimeout(() => {
       alignToSnap();
-      computeAndSetPage();
+      computeFromScroll();
       setIsPaused(false);
     }, 500);
   };
@@ -164,9 +171,7 @@ export function InstagramVideoCarousel({
     <section className="relative">
       <div className="text-center mb-8">
         <h2 className="text-3xl font-bold mb-2">Creator Videos</h2>
-        <p className="text-muted-foreground">
-          Short clips from influencers and reviewers
-        </p>
+        <p className="text-muted-foreground">Short clips from influencers and reviewers</p>
       </div>
 
       <div
@@ -174,7 +179,6 @@ export function InstagramVideoCarousel({
         onMouseEnter={() => setIsPaused(true)}
         onMouseLeave={() => setIsPaused(false)}
       >
-        {/* Exact N-per-view sizing via CSS vars; no arrows */}
         <div
           ref={scrollRef}
           className="
@@ -187,11 +191,15 @@ export function InstagramVideoCarousel({
           style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
         >
           {loopItems.map((v) => (
-            <VideoCard key={v.id} video={v} />
+            <VideoCard
+              key={v.id}
+              video={v}
+              activeId={activeId}
+              onRequestActive={(id) => setActiveId(id)}
+            />
           ))}
         </div>
 
-        {/* Pagination */}
         {totalPages > 1 && (
           <div className="mt-4 flex items-center justify-center gap-2">
             {Array.from({ length: totalPages }).map((_, i) => {
@@ -204,9 +212,7 @@ export function InstagramVideoCarousel({
                   aria-current={active ? "page" : undefined}
                   className={[
                     "h-2 rounded-full transition-all",
-                    active
-                      ? "w-8 bg-foreground/90"
-                      : "w-2 bg-foreground/30 hover:bg-foreground/50",
+                    active ? "w-8 bg-foreground/90" : "w-2 bg-foreground/30 hover:bg-foreground/50",
                   ].join(" ")}
                   onClick={() => goToPage(i)}
                 />
@@ -219,57 +225,78 @@ export function InstagramVideoCarousel({
   );
 }
 
-function VideoCard({ video }: { video: InfluencerVideo }) {
-  const ref = useRef<HTMLVideoElement>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
+function VideoCard({
+  video,
+  activeId,
+  onRequestActive,
+}: {
+  video: InfluencerVideo;
+  activeId: string | number | null;
+  onRequestActive: (id: string | number) => void;
+}) {
+  const cardRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
   const [isMuted, setIsMuted] = useState(true);
   const [showControls, setShowControls] = useState(false);
 
+  // ✅ only mount video when near/inside viewport
+  const [inView, setInView] = useState(false);
+
+  const isActive = activeId != null && activeId === video.id;
+
+  // Observe the card itself (better than observing <video>)
   useEffect(() => {
-    const el = ref.current;
+    const el = cardRef.current;
     if (!el) return;
 
     const obs = new IntersectionObserver(
       (entries) => {
-        const inView = entries[0]?.isIntersecting ?? false;
-        if (inView) {
-          el.play()
-            .then(() => setIsPlaying(true))
-            .catch(() => setIsPlaying(false));
-        } else {
-          el.pause();
-          setIsPlaying(false);
-        }
+        const entry = entries[0];
+        setInView(entry.isIntersecting);
       },
-      { threshold: 0.5 }
+      { threshold: 0.25, rootMargin: "200px" }
     );
 
     obs.observe(el);
     return () => obs.disconnect();
   }, []);
 
+  // ✅ enforce "only active plays"
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+
+    const shouldPlay = isActive && inView;
+
+    if (shouldPlay) {
+      el.muted = isMuted;
+      el.play().catch(() => {});
+    } else {
+      el.pause();
+    }
+  }, [isActive, inView, isMuted]);
+
   const toggleMute = () => {
-    const el = ref.current;
+    const el = videoRef.current;
     if (!el) return;
     el.muted = !isMuted;
     setIsMuted(!isMuted);
   };
 
-  const togglePlay = () => {
-    const el = ref.current;
-    if (!el) return;
-    if (isPlaying) {
-      el.pause();
-      setIsPlaying(false);
-    } else {
-      el.play()
-        .then(() => setIsPlaying(true))
-        .catch(() => setIsPlaying(false));
-    }
+  const onCardClick = () => {
+    onRequestActive(video.id);
+
+    const el = videoRef.current;
+    if (!el || !inView) return;
+
+    if (el.paused) el.play().catch(() => {});
+    else el.pause();
   };
 
   return (
     <div
+      ref={cardRef}
       data-card="true"
       className="
         shrink-0 snap-start relative group cursor-pointer
@@ -278,35 +305,48 @@ function VideoCard({ video }: { video: InfluencerVideo }) {
       "
       onMouseEnter={() => setShowControls(true)}
       onMouseLeave={() => setShowControls(false)}
-      onClick={togglePlay}
+      onClick={onCardClick}
     >
       <div className="relative aspect-[9/16] rounded-xl overflow-hidden bg-muted shadow-lg">
-        <video
-          ref={ref}
-          className="w-full h-full object-cover"
-          loop
-          muted={isMuted}
-          playsInline
-          poster={video.thumbnail_url ?? undefined}
-        >
-          <source src={video.video_url ?? ""} type="video/mp4" />
-        </video>
+        {/* ✅ Optimized thumbnail using next/image */}
+        {!!video.thumbnail_url && (
+          <Image
+            src={video.thumbnail_url}
+            alt={video.influencer_name ?? "Influencer video"}
+            fill
+            className={["object-cover transition-opacity duration-300", inView ? "opacity-0" : "opacity-100"].join(
+              " "
+            )}
+            sizes="(max-width: 768px) 50vw, (max-width: 1280px) 25vw, 16vw"
+          />
+        )}
+
+        {/* ✅ lazy mount video */}
+        {(inView || isActive) && (
+          <video
+            ref={videoRef}
+            className="absolute inset-0 w-full h-full object-cover"
+            loop
+            muted={isMuted}
+            playsInline
+            preload="metadata"
+            poster={video.thumbnail_url ?? undefined}
+            controls={false}
+            disablePictureInPicture
+            controlsList="nodownload noplaybackrate"
+          >
+            <source src={video.video_url ?? ""} type="video/mp4" />
+          </video>
+        )}
 
         {/* overlay gradient */}
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent pointer-events-none" />
 
         {/* bottom meta */}
         <div className="absolute bottom-0 left-0 right-0 p-4 text-white">
-          {/* <h3 className="font-semibold text-sm mb-1 line-clamp-2">{video.influencer_name}</h3> */}
-          {video.caption && (
-            <p className="text-xs text-white/80 mb-2 line-clamp-1">
-              {video.caption}
-            </p>
-          )}
+          {video.caption && <p className="text-xs text-white/80 mb-2 line-clamp-1">{video.caption}</p>}
+
           <div className="flex items-center justify-between">
-            {/* {typeof video.views === 'number' ? (
-              <span className="text-xs text-white/70">{Intl.NumberFormat('en', { notation: 'compact' }).format(video.views)} views</span>
-            ) : <span />} */}
             {video.instagram_link && (
               <Button
                 size="sm"
@@ -323,8 +363,8 @@ function VideoCard({ video }: { video: InfluencerVideo }) {
           </div>
         </div>
 
-        {/* mute button */}
-        {showControls && (
+        {/* mute button (only show on hover; optionally only when active) */}
+        {showControls && isActive && (
           <div className="absolute top-4 right-4 pointer-events-auto">
             <Button
               variant="secondary"
@@ -335,11 +375,7 @@ function VideoCard({ video }: { video: InfluencerVideo }) {
                 toggleMute();
               }}
             >
-              {isMuted ? (
-                <VolumeX className="h-4 w-4" />
-              ) : (
-                <Volume2 className="h-4 w-4" />
-              )}
+              {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
             </Button>
           </div>
         )}

@@ -184,16 +184,16 @@ export function Header() {
                       <User className="h-4 w-4 mr-2" /> Account
                     </Link>
                   </Button>
-                  <Button asChild variant="outline" className="flex-1">
+                  {/* <Button asChild variant="outline" className="flex-1">
                     <Link href="/account/wishlist">
                       <Heart className="h-4 w-4 mr-2" /> Wishlist
                     </Link>
-                  </Button>
-                  <Button asChild variant="outline" className="flex-1">
+                  </Button> */}
+                  {/* <Button asChild variant="outline" className="flex-1">
                     <Link href="/cart">
                       <ShoppingCart className="h-4 w-4 mr-2" /> Cart
                     </Link>
-                  </Button>
+                  </Button> */}
                 </div>
 
                 <Separator />
@@ -399,90 +399,86 @@ export function Header() {
           </div>
 
           {/* Right cluster: search + CTA + account/wishlist/cart (desktop) */}
-          <div className="flex items-center gap-1 sm:gap-2">
-            <div className="hidden lg:block w-[360px]">
-              <SearchAutocomplete />
-            </div>
+         {/* Right cluster: mobile cart + search + CTA + account/cart (desktop) */}
+<div className="flex items-center gap-1 sm:gap-2">
+  {/* ✅ Mobile Cart (outside menu) */}
+  <Button
+    variant="ghost"
+    size="icon"
+    className="relative md:hidden"
+    asChild
+    aria-label="Cart"
+  >
+    <Link href="/cart">
+      <ShoppingCart className="h-5 w-5" />
+      {totalItems > 0 && (
+        <Badge
+          variant="destructive"
+          className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-xs"
+        >
+          {totalItems}
+        </Badge>
+      )}
+      <span className="sr-only">Cart</span>
+    </Link>
+  </Button>
 
-            {/* Become Partner visible everywhere, flashy */}
-            <Button
-              asChild
-              className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-pink-500 via-rose-500 to-amber-400 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-pink-500/50 animate-pulse hover:animate-none hover:scale-105 hover:shadow-pink-500/80 transition-transform transition-shadow duration-700"
-            >
-              <Link href="/influencer-request">K- PartnerUp</Link>
-            </Button>
+  <div className="hidden lg:block w-[360px]">
+    <SearchAutocomplete />
+  </div>
 
-            {/* Search toggle: only on md (tablet-ish), hidden on small mobile */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="hidden md:inline-flex lg:hidden"
-              onClick={() => setShowSearch((s) => !s)}
-              aria-label="Toggle search"
-            >
-              {showSearch ? (
-                <X className="h-5 w-5" />
-              ) : (
-                <Search className="h-5 w-5" />
-              )}
-            </Button>
+  <Button
+    asChild
+    className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-pink-500 via-rose-500 to-amber-400 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-pink-500/50 animate-pulse hover:animate-none hover:scale-105 hover:shadow-pink-500/80 transition-transform transition-shadow duration-700"
+  >
+    <Link href="/influencer-request">K- PartnerUp</Link>
+  </Button>
 
-            {/* Account / Wishlist / Cart hidden on mobile header, visible from md up */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="hidden md:inline-flex"
-              asChild
-              aria-label="Account"
-            >
-              <Link href={isAuthenticated ? "/account" : "/auth/login"}>
-                <User className="h-5 w-5" />
-                <span className="sr-only">Account</span>
-              </Link>
-            </Button>
+  <Button
+    variant="ghost"
+    size="icon"
+    className="hidden md:inline-flex lg:hidden"
+    onClick={() => setShowSearch((s) => !s)}
+    aria-label="Toggle search"
+  >
+    {showSearch ? <X className="h-5 w-5" /> : <Search className="h-5 w-5" />}
+  </Button>
 
-            <Button
-              variant="ghost"
-              size="icon"
-              className="relative hidden md:inline-flex"
-              asChild
-              aria-label="Wishlist"
-            >
-              <Link href="/account/wishlist">
-                <Heart className="h-5 w-5" />
-                {wishlistCount > 0 && (
-                  <Badge
-                    variant="destructive"
-                    className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-xs"
-                  >
-                    {wishlistCount}
-                  </Badge>
-                )}
-                <span className="sr-only">Wishlist</span>
-              </Link>
-            </Button>
+  <Button
+    variant="ghost"
+    size="icon"
+    className="hidden md:inline-flex"
+    asChild
+    aria-label="Account"
+  >
+    <Link href={isAuthenticated ? "/account" : "/auth/login"}>
+      <User className="h-5 w-5" />
+      <span className="sr-only">Account</span>
+    </Link>
+  </Button>
 
-            <Button
-              variant="ghost"
-              size="icon"
-              className="relative hidden md:inline-flex"
-              asChild
-              aria-label="Cart"
-            >
-              <Link href="/cart">
-                <ShoppingCart className="h-5 w-5" />
-                {totalItems > 0 && (
-                  <Badge
-                    variant="destructive"
-                    className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-xs"
-                  >
-                    {totalItems}
-                  </Badge>
-                )}
-                <span className="sr-only">Cart</span>
-              </Link>
-            </Button>
-          </div>
+  <Button
+    variant="ghost"
+    size="icon"
+    className="relative hidden md:inline-flex"
+    asChild
+    aria-label="Cart"
+  >
+    <Link href="/cart">
+      <ShoppingCart className="h-5 w-5" />
+      {totalItems > 0 && (
+        <Badge
+          variant="destructive"
+          className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-xs"
+        >
+          {totalItems}
+        </Badge>
+      )}
+      <span className="sr-only">Cart</span>
+    </Link>
+  </Button>
+</div>
+
         </div>
 
         {/* Mobile search bar (only when toggled on md) */}
